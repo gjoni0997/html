@@ -1,0 +1,3390 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Unicode HTML 实时渲染与批量导出测试工具</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 20px;
+    background: #f4f6f9;
+    color: #333;
+    font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        "Microsoft YaHei",
+        sans-serif;
+}
+
+.container {
+    max-width: 1500px;
+    margin: 0 auto;
+    background: #fff;
+    padding: 24px;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,.08);
+}
+
+h2 {
+    margin: 0 0 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #eaedf3;
+    font-size: 22px;
+}
+
+h3 {
+    margin: 0 0 12px;
+    font-size: 16px;
+}
+
+.row {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 15px;
+}
+
+.col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+label {
+    margin-bottom: 7px;
+    font-weight: bold;
+    font-size: 14px;
+    color: #444;
+}
+
+input[type="text"],
+input[type="number"],
+textarea,
+select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccd4e0;
+    border-radius: 6px;
+    font-size: 14px;
+    background: #fff;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+    border-color: #236cda;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(35,108,218,.1);
+}
+
+textarea {
+    font-family: Consolas, "Courier New", monospace;
+    resize: vertical;
+}
+
+.input-area {
+    height: 140px;
+}
+
+.button-text-area {
+    height: 96px;
+    min-height: 72px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+.field-hint {
+    display: block;
+    margin-top: 6px;
+    color: #737b89;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+button {
+    border: 0;
+    border-radius: 6px;
+    padding: 10px 18px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 14px;
+    background: #236cda;
+    color: white;
+}
+
+button:hover {
+    background: #1f5bbe;
+}
+
+button:active {
+    transform: scale(.98);
+}
+
+button.secondary {
+    background: #687385;
+}
+
+button.secondary:hover {
+    background: #566172;
+}
+
+button.danger {
+    background: #c0392b;
+}
+
+button.danger:hover {
+    background: #a93226;
+}
+
+button.green {
+    background: #198754;
+}
+
+button.green:hover {
+    background: #157347;
+}
+
+button.orange {
+    background: #e67e22;
+}
+
+button.orange:hover {
+    background: #ca6f1e;
+}
+
+button:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+}
+
+.btn-container {
+    text-align: center;
+    margin: 20px 0;
+}
+
+.main-button {
+    padding: 14px 50px;
+    font-size: 16px;
+}
+
+.export-box {
+    margin-top: 10px;
+    padding: 16px;
+    background: #f8fafc;
+    border: 1px solid #dfe5ec;
+    border-radius: 8px;
+}
+
+.export-row {
+    display: flex;
+    align-items: end;
+    gap: 12px;
+}
+
+.export-number {
+    width: 180px !important;
+}
+
+.export-button {
+    padding: 11px 25px;
+}
+
+.progress-wrap {
+    margin-top: 12px;
+    display: none;
+}
+
+.progress-bg {
+    width: 100%;
+    height: 12px;
+    border-radius: 20px;
+    background: #e5e9ef;
+    overflow: hidden;
+}
+
+.progress-bar {
+    width: 0%;
+    height: 100%;
+    background: #236cda;
+    transition: width .1s;
+}
+
+.progress-text {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #687385;
+}
+
+.panel-container {
+    display: flex;
+    gap: 20px;
+    margin-top: 15px;
+    min-height: 560px;
+}
+
+.panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.code-output {
+    width: 100%;
+    height: 560px;
+    background: #fafafa;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    border: 1px solid #ccd4e0;
+    border-radius: 6px;
+    padding: 12px;
+    resize: none;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.preview-box {
+    width: 100%;
+    height: 560px;
+    border: 1px solid #ccd4e0;
+    border-radius: 6px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.preview-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+.control-box {
+    background: #f8fafc;
+    border: 1px solid #e0e5ec;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+.control-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+
+.switch-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.switch-row input {
+    width: auto;
+}
+
+.stats {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.stat {
+    background: white;
+    border: 1px solid #e0e5ec;
+    border-radius: 7px;
+    padding: 10px;
+}
+
+.stat-title {
+    color: #687385;
+    font-size: 12px;
+}
+
+.stat-value {
+    font-size: 18px;
+    font-weight: bold;
+    margin-top: 3px;
+}
+
+.char-toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.char-list {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 8px;
+    background: white;
+    border: 1px solid #dfe4eb;
+    border-radius: 6px;
+}
+
+.char-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px;
+    border: 1px solid #e1e5eb;
+    border-radius: 5px;
+    font-size: 11px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.char-item:hover {
+    background: #f3f6fa;
+}
+
+.char-code {
+    font-family: Consolas, monospace;
+    font-weight: bold;
+}
+
+.char-preview {
+    min-width: 16px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed #bbb;
+    font-family: monospace;
+}
+
+.log {
+    width: 100%;
+    height: 220px;
+    background: #10141a;
+    color: #dce5ef;
+    border-radius: 7px;
+    padding: 12px;
+    font-family: Consolas, monospace;
+    font-size: 12px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+}
+
+.help {
+    color: #687385;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.warning {
+    margin-top: 10px;
+    padding: 9px 12px;
+    border-radius: 6px;
+    background: #fff8e6;
+    border: 1px solid #f0d98a;
+    color: #765b00;
+    font-size: 12px;
+}
+
+@media (max-width: 1000px) {
+
+    .row,
+    .panel-container {
+        flex-direction: column;
+    }
+
+    .control-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .char-list {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .export-row {
+        flex-wrap: wrap;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>Unicode HTML 实时渲染与批量导出测试工具</h2>
+
+
+<!-- =====================================================
+     ① 测试内容
+     ===================================================== -->
+
+<div class="control-box">
+
+    <h3>① 测试内容</h3>
+
+    <div class="row">
+
+        <div class="col">
+
+            <label>
+                前置测试内容
+            </label>
+
+            <textarea
+                id="beforeContent"
+                class="input-area"
+                placeholder="输入需要进行 Unicode / HTML 鲁棒性测试的前置内容..."></textarea>
+
+        </div>
+
+    </div>
+
+
+    <div class="row">
+
+        <div class="col">
+
+            <label>
+                测试链接 URL
+            </label>
+
+            <input
+                id="targetUrl"
+                type="text"
+                value="%{AUTOVALS1}">
+
+        </div>
+
+
+        <div class="col">
+
+            <label>
+                按钮显示文字
+            </label>
+
+            <textarea
+                id="buttonText"
+                class="input-area button-text-area"
+                rows="3"
+                placeholder="每行输入一段按钮文字，生成后会按换行显示；支持空行。&#10;例如：&#10;ご利用明細を確認&#10;こちらをクリックしてください"></textarea>
+            <small class="field-hint">支持多行文字；输入几行，按钮中就按相同顺序分行显示。留空时使用默认文字。</small>
+
+        </div>
+
+    </div>
+
+
+    <div class="row">
+
+        <div class="col">
+
+            <label>
+                后置测试内容
+            </label>
+
+            <textarea
+                id="afterContent"
+                class="input-area"
+                placeholder="输入需要进行 Unicode / HTML 鲁棒性测试的后置内容..."></textarea>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     ④ 单次实时生成
+     ===================================================== -->
+
+<div class="btn-container">
+
+    <button
+        class="main-button"
+        onclick="synthesizeTemplate()">
+
+        一键实时合成（每次点击重新生成）
+
+    </button>
+
+</div>
+
+
+<!-- =====================================================
+     ⑤ 批量导出
+     ===================================================== -->
+
+<div class="export-box">
+
+    <h3>⑤ 批量生成并导出 HTML</h3>
+
+
+    <div class="export-row">
+
+        <div>
+
+            <label>
+                生成数量
+            </label>
+
+            <input
+                id="exportCount"
+                class="export-number"
+                type="number"
+                min="1"
+                max="5000"
+                value="10">
+
+        </div>
+
+
+        <button
+            id="exportButton"
+            class="orange export-button"
+            onclick="batchGenerateAndExport()">
+
+            一键生成并导出 HTML
+
+        </button>
+
+    </div>
+
+
+    <div class="help" style="margin-top:8px">
+
+        按照 contentlist.txt 的格式，将所有随机生成的 HTML
+        按顺序连续写入同一个 contentlist.txt 文档。
+
+    </div>
+
+
+    <div class="warning">
+
+        建议单次生成数量不要过大。
+        大量 HTML 会暂时占用浏览器内存。
+
+    </div>
+
+
+    <div
+        id="progressWrap"
+        class="progress-wrap">
+
+        <div class="progress-bg">
+
+            <div
+                id="progressBar"
+                class="progress-bar">
+            </div>
+
+        </div>
+
+
+        <div
+            id="progressText"
+            class="progress-text">
+
+            准备中...
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     ⑥ 统计
+     ===================================================== -->
+
+<div class="stats">
+
+    <div class="stat">
+
+        <div class="stat-title">
+            本次字符数
+        </div>
+
+        <div
+            class="stat-value"
+            id="statChars">
+            0
+        </div>
+
+    </div>
+
+
+    <div class="stat">
+
+        <div class="stat-title">
+            输出长度
+        </div>
+
+        <div
+            class="stat-value"
+            id="statLength">
+            0
+        </div>
+
+    </div>
+
+
+    <div class="stat">
+
+        <div class="stat-title">
+            HTML 大小
+        </div>
+
+        <div
+            class="stat-value"
+            id="statBytes">
+            0 B
+        </div>
+
+    </div>
+
+
+    <div class="stat">
+
+        <div class="stat-title">
+            生成耗时
+        </div>
+
+        <div
+            class="stat-value"
+            id="statTime">
+            0 ms
+        </div>
+
+    </div>
+
+
+    <div class="stat">
+
+        <div class="stat-title">
+            性能测试
+        </div>
+
+        <div
+            class="stat-value"
+            id="statBenchmark">
+            --
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     ⑦ 双栏
+     ===================================================== -->
+
+<div class="panel-container">
+
+    <div class="panel">
+
+        <label>
+            [左栏] 本次生成 HTML 源码
+        </label>
+
+
+        <textarea
+            id="codeOutput"
+            class="code-output"
+            readonly
+            placeholder="点击上方按钮生成测试变体..."></textarea>
+
+    </div>
+
+
+    <div class="panel">
+
+        <label>
+            [右栏] 实时渲染效果
+        </label>
+
+
+        <div class="preview-box">
+
+            <iframe
+                id="previewIframe"
+                class="preview-iframe"
+                sandbox="">
+            </iframe>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     ⑧ 日志
+     ===================================================== -->
+
+<div
+    class="control-box"
+    style="margin-top:20px">
+
+    <h3>
+        ⑥ 测试日志
+    </h3>
+
+
+    <div
+        id="log"
+        class="log">
+    </div>
+
+</div>
+
+
+
+
+<!-- =====================================================
+     ② Unicode 字符池
+     ===================================================== -->
+
+<div class="control-box">
+
+    <h3>② Unicode 测试字符池</h3>
+
+
+    <div class="char-toolbar">
+
+        <button onclick="selectAllChars()">
+            全部启用
+        </button>
+
+        <button
+            class="secondary"
+            onclick="unselectAllChars()">
+            全部关闭
+        </button>
+
+        <button
+            class="secondary"
+            onclick="selectRandomChars()">
+            随机选择
+        </button>
+
+        <button
+            class="green"
+            onclick="saveConfig()">
+            保存配置
+        </button>
+
+        <button
+            class="secondary"
+            onclick="loadConfig()">
+            读取配置
+        </button>
+
+        <button
+            class="danger"
+            onclick="resetConfig()">
+            恢复默认
+        </button>
+
+    </div>
+
+
+    <div id="charList" class="char-list"></div>
+
+
+    <div class="help">
+
+        当前字符池按照你提供的列表建立。
+
+        已排除 U+202A–U+202E 与 U+2066–U+2069。
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     ③ 参数
+     ===================================================== -->
+
+<div class="control-box">
+
+    <h3>③ 测试参数</h3>
+
+
+    <div class="control-grid">
+
+        <div>
+
+            <label>
+                字符插入概率 (%)
+            </label>
+
+            <input
+                id="noiseProbability"
+                type="number"
+                min="0"
+                max="100"
+                value="35">
+
+        </div>
+
+
+        <div>
+
+            <label>
+                每个位置最大重复次数
+            </label>
+
+            <input
+                id="maxRepeat"
+                type="number"
+                min="1"
+                max="10"
+                value="2">
+
+        </div>
+
+        <div>
+            <label for="randomSeed">随机种子（可选）</label>
+            <input id="randomSeed" type="text" value="" placeholder="留空则每次随机；填写后可复现结果">
+            <small class="field-hint">相同种子与参数可复现测试样本；批量生成会在同一随机序列中逐条变化。</small>
+        </div>
+
+
+        <div>
+
+            <label>
+                HTML 最大宽度
+            </label>
+
+            <input
+                id="maxWidth"
+                type="text"
+                inputmode="numeric"
+                value="500-560"
+                placeholder="例如 500-560 或 560"
+                aria-describedby="maxWidthHelp">
+
+            <small id="maxWidthHelp" class="field-hint">可填写固定宽度（如 560）或随机范围（如 500-560），单位 px。</small>
+
+        </div>
+
+
+        <div>
+
+            <label for="headMetaDensity">文档头 Meta 数量</label>
+            <select id="headMetaDensity">
+                <option value="light">精简</option>
+                <option value="normal" selected>标准</option>
+                <option value="rich">丰富</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label for="headCssMode">文档头 CSS 风格</label>
+            <select id="headCssMode">
+                <option value="random" selected>随机风格</option>
+                <option value="minimal">简洁</option>
+                <option value="button">按钮辅助样式</option>
+                <option value="text">文字排版</option>
+            </select>
+
+        </div>
+
+    </div>
+
+
+    <div class="switch-row">
+
+        <input
+            type="checkbox"
+            id="enableNoise"
+            checked>
+
+        <label
+            for="enableNoise"
+            style="margin:0">
+
+            启用 Unicode 字符测试
+
+        </label>
+
+    </div>
+    <div class="switch-row" style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 15px;">
+        <label style="margin:0; font-weight:normal;"><input type="checkbox" id="enableHomoglyph" checked> 启用日本敏感词异义替换</label>
+        <label style="margin:0; font-weight:normal;"><input type="checkbox" id="enableSmuggling" checked> 启用ASCII走私标签</label>
+        <label style="margin:0; font-weight:normal;"><input type="checkbox" id="enableZeroFont" checked> 启用动态ZeroFont</label>
+        <label style="margin:0; font-weight:normal;"><input type="checkbox" id="enablePixelGrid" checked> 启用多层网格降级</label>
+    </div>
+
+
+</div>
+
+
+
+
+</div>
+
+
+<script>
+
+/* =========================================================
+   Unicode 字符池
+   ========================================================= */
+
+/* =========================================================
+   日本高危邮件反拦截多态对抗引擎 (Extended Homoglyph Bank)
+   ========================================================= */
+const JAPAN_EXT_HOMOGLYPH_BANK = {
+    'パ': ['バ', 'ぱ', 'パ', 'ﾊﾟ'], 'ス': ['ヌ', 'す', 'ｽ', 'ズ'], 'ワ': ['ヮ', 'わ', 'ﾜ'], 
+    'ー': ['─', '―', '━', 'ｰ'], 'ド': ['ド', 'ど', 'ﾄﾞ'], 'ア': ['ァ', 'あ', 'ｱ'], 
+    'ウ': ['ゥ', 'う', 'ｳ', 'ヴ'], 'ン': ['ソ', 'し', 'ﾝ', 'ッ'], 'イ': ['ィ', 'い', 'ｲ'],
+    'グ': ['グ', 'ご', 'ｸﾞ'], 'ジ': ['ジ', 'じ', 'ｼﾞ'], 'メ': ['ﾒ', 'め'], 'ル': ['ﾙ', 'る'],
+    'セ': ['ｾ', 'せ'], 'ッ': ['ッ', 'つ', 'ｯ'], 'リ': ['ﾘ', 'り'], 'テ': ['ﾃ', 'て'],
+    'ク': ['く', 'ｸ'], 'サ': ['さ', 'ｻ'], 'コ': ['ご', 'ｺ'], 'タ': ['た', 'ﾀ'],
+    'カ': ['力', 'か', 'ヵ', 'ｶ'], 'ト': ['卜', 'と', '卜', 'ﾄ'], 'ロ': ['口', 'ろ', '口', 'ﾛ'], 
+    'エ': ['工', 'え', '工', 'ｴ'], 'ニ': ['二', 'に', '二', 'ﾆ'], '夕': ['タ', 'た', 'タ'], 
+    'ハ': ['八', 'は', '八', 'ﾊ'],
+    '確': ['確', 'かく', '碻', '硞', 'かくにん'], '認': ['認', 'にん', '刄心', '讠心'],
+    '信': ['言', 'しん', '㐰', '倍'], '号': ['号', 'ごう', '号', '𠮟'],
+    '銀': ['银', 'ぎん', '金艮', '银'], '行': ['彳亍', 'こう', '亍', '𠂢'],
+    '座': ['ざ', '广坐', '庄'], '金': ['釒', 'きん', 'かね', '𨤏'],
+    '支': ['払', 'し', '十又', '支払'], '払': ['払', 'はら', '扌ム', '払い'],
+    '警': ['敬言', 'けい', '驚'], '告': ['告', 'こく', '牛口', '哠'],
+    '密': ['みつ', '宀必'], '碼': ['ま', '石马'], '通': ['つう', 'マ甬'], '知': ['ち', '矢口'],
+    'a': ['а'], 'c': ['с', 'ⅽ'], 'e': ['е'], 'o': ['о', 'ο'], 'p': ['р'], 
+    's': ['ѕ', 'ｓ'], 'i': ['і', 'ⅰ'], 'x': ['х', 'ⅹ'], 'v': ['ｖ', 'ⅴ']
+};
+
+const JAPAN_FAKE_WORDS = ["配信", "通知", "安全", "業務", "自動", "設定", "確認", "完了", "保護", "情報", "安心", "送信"];
+
+// 功能4：日本敏感词及同形异义字自动替换
+function antHomoglyph(text, prob) {
+    let result = "";
+    for (let char of text) {
+        if (JAPAN_EXT_HOMOGLYPH_BANK[char] && randomFloat() * 100 < prob) {
+            let list = JAPAN_EXT_HOMOGLYPH_BANK[char];
+            result += list[Math.floor(randomFloat() * list.length)];
+        } else {
+            result += char;
+        }
+    }
+    return result;
+}
+
+// 功能1：自动 ASCII 走私与标签注入
+function antAsciiSmuggling(text) {
+    let fakePayload = "JP_SERVER_AUTH_" + Math.floor(1000 + randomFloat() * 9000);
+    let smuggledStr = "";
+    for (let i = 0; i < fakePayload.length; i++) {
+        smuggledStr += String.fromCodePoint(fakePayload.charCodeAt(i) + 0xE0000);
+    }
+    let pos = Math.floor(randomFloat() * (text.length + 1));
+    return text.substring(0, pos) + smuggledStr + text.substring(pos);
+}
+
+// 功能2：混合零字体攻击 (Zero-Font) 协同减少传统噪音字符密度
+function antZeroFontSplitting(text, prob) {
+    let chars = Array.from(text);
+    let output = [];
+    for (let i = 0; i < chars.length; i++) {
+        output.push(chars[i]);
+        if (i < chars.length - 1 && randomFloat() * 100 < prob) {
+            let randFake = JAPAN_FAKE_WORDS[Math.floor(randomFloat() * JAPAN_FAKE_WORDS.length)];
+            output.push(`<span style="font-size:0px !important;line-height:0 !important;display:none !important;visibility:hidden;opacity:0;max-height:0;mso-hide:all;">${randFake}</span>`);
+            
+            // 极低概率触发留存零宽字符，实现与 ZeroFont 的协同混合，大幅降低纯传统噪音的指纹密度
+            if (randomFloat() > 0.85) {
+                output.push("&#x200C;");
+            }
+        }
+    }
+    return output.join("");
+}
+
+// 总调度函数：完美继承原有的 Unicode 概率参数
+function applyAntDefense(line) {
+    let prob = Math.max(0, Math.min(100, Number(document.getElementById("noiseProbability").value) || 0));
+    let current = line;
+    
+    if (document.getElementById("enableHomoglyph")?.checked) {
+        current = antHomoglyph(current, prob);
+    }
+    if (document.getElementById("enableSmuggling")?.checked) {
+        current = antAsciiSmuggling(current);
+    }
+    if (document.getElementById("enableZeroFont")?.checked) {
+        current = antZeroFontSplitting(current, prob);
+    }
+    return current;
+}
+
+const DEFAULT_CODES = [
+
+    "U+200C",
+    "U+200D",
+    "U+200B",
+    "U+FEFF",
+    "U+2060",
+    "U+200F"
+];
+
+
+/* =========================================================
+   状态
+   ========================================================= */
+
+let enabledCodes =
+    new Set(DEFAULT_CODES);
+
+
+/* =========================================================
+   基础工具
+   ========================================================= */
+
+// 可复现的测试随机源：种子为空时使用浏览器默认随机源。
+let seededRandomState = null;
+function setRandomSeed(seed) {
+    const value = String(seed ?? '').trim();
+    if (!value) { seededRandomState = null; return; }
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i++) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    seededRandomState = hash >>> 0 || 1;
+}
+function randomFloat() {
+    if (seededRandomState === null) return Math.random();
+    // Mulberry32：用于可复现的测试数据，不用于密码学用途。
+    let t = seededRandomState += 0x6D2B79F5;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+function pick(arr) {
+    return arr[Math.floor(randomFloat() * arr.length)];
+}
+
+
+function rand(min, max) {
+
+    return Math.floor(
+        randomFloat() *
+        (max - min + 1)
+    ) + min;
+}
+
+
+function codeToChar(code) {
+
+    const hex =
+        code.replace(/^U\+/i, "");
+
+    const cp =
+        parseInt(hex, 16);
+
+    if (!Number.isFinite(cp)) {
+        return "";
+    }
+
+    try {
+
+        return String.fromCodePoint(cp);
+
+    } catch {
+
+        return "";
+    }
+}
+
+
+function escapeHtml(text) {
+
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+
+function formatBytes(bytes) {
+
+    if (bytes < 1024) {
+
+        return bytes + " B";
+    }
+
+    if (bytes < 1024 * 1024) {
+
+        return (
+            bytes / 1024
+        ).toFixed(2) + " KB";
+    }
+
+    return (
+        bytes / 1024 / 1024
+    ).toFixed(2) + " MB";
+}
+
+
+/* =========================================================
+   字符池 UI
+   ========================================================= */
+
+function renderCharList() {
+
+    const container =
+        document.getElementById(
+            "charList"
+        );
+
+    container.innerHTML = "";
+
+
+    DEFAULT_CODES.forEach(code => {
+
+        const item =
+            document.createElement(
+                "label"
+            );
+
+        item.className =
+            "char-item";
+
+
+        const checkbox =
+            document.createElement(
+                "input"
+            );
+
+        checkbox.type =
+            "checkbox";
+
+        checkbox.checked =
+            enabledCodes.has(code);
+
+
+        checkbox.addEventListener(
+            "change",
+            () => {
+
+                if (checkbox.checked) {
+
+                    enabledCodes.add(
+                        code
+                    );
+
+                } else {
+
+                    enabledCodes.delete(
+                        code
+                    );
+                }
+
+                saveConfig(false);
+            }
+        );
+
+
+        const codeSpan =
+            document.createElement(
+                "span"
+            );
+
+        codeSpan.className =
+            "char-code";
+
+        codeSpan.textContent =
+            code;
+
+
+        const preview =
+            document.createElement(
+                "span"
+            );
+
+        preview.className =
+            "char-preview";
+
+        const char =
+            codeToChar(code);
+
+        preview.textContent =
+            char || "□";
+
+
+        item.appendChild(
+            checkbox
+        );
+
+        item.appendChild(
+            codeSpan
+        );
+
+        item.appendChild(
+            preview
+        );
+
+
+        container.appendChild(
+            item
+        );
+
+    });
+}
+
+
+/* =========================================================
+   字符选择
+   ========================================================= */
+
+function selectAllChars() {
+
+    enabledCodes =
+        new Set(DEFAULT_CODES);
+
+    renderCharList();
+
+    saveConfig(false);
+}
+
+
+function unselectAllChars() {
+
+    enabledCodes.clear();
+
+    renderCharList();
+
+    saveConfig(false);
+}
+
+
+function selectRandomChars() {
+
+    enabledCodes.clear();
+
+
+    DEFAULT_CODES.forEach(code => {
+
+        if (randomFloat() < .35) {
+
+            enabledCodes.add(code);
+        }
+
+    });
+
+
+    if (enabledCodes.size === 0) {
+
+        enabledCodes.add(
+            pick(DEFAULT_CODES)
+        );
+    }
+
+
+    renderCharList();
+
+    saveConfig(false);
+}
+
+
+/* =========================================================
+   获取启用字符
+   ========================================================= */
+
+function getEnabledChars() {
+
+    return Array.from(
+        enabledCodes
+    )
+    .map(code => ({
+
+        code: code,
+        char: codeToChar(code)
+
+    }))
+    .filter(x => x.char);
+}
+
+
+/* =========================================================
+   Unicode 测试
+   ========================================================= */
+
+function injectUnicodeTest(text, usedCodes) {
+    if (!document.getElementById("enableNoise").checked) return text;
+
+    const chars = getEnabledChars();
+    if (!chars.length) return text;
+
+    const probability = Math.max(0, Math.min(100,
+        Number(document.getElementById("noiseProbability").value) || 0
+    )) / 100;
+    const maxRepeat = Math.max(1, Math.min(10,
+        Number(document.getElementById("maxRepeat").value) || 1
+    ));
+
+    // 数字/编号保护：例如 5,000、12.5、10,000円、99市場、2026-10-28。
+    // 同时保护数字前后的空白及常见数字标点，避免出现不可见字符堆叠。
+    const source = Array.from(String(text));
+    const protectedIndex = new Set();
+    const numericPattern = /[0-9０-９]+(?:[,.，．٫٬:：/／\-－–—][0-9０-９]+)*(?:\s*(?:円|万円|％|%|‰|‱|件|個|回|人|日|年|月|時|分|秒|km|kg|MB|GB))?/giu;
+
+    for (const match of String(text).matchAll(numericPattern)) {
+        const begin = Array.from(String(text).slice(0, match.index)).length;
+        const end = begin + Array.from(match[0]).length;
+        // 数字 token 自身，以及紧邻 token 的空白/标点，都不插入测试字符。
+        for (let i = Math.max(0, begin - 1); i < Math.min(source.length, end + 1); i++) {
+            protectedIndex.add(i);
+        }
+    }
+
+    let result = "";
+    for (let i = 0; i < source.length; i++) {
+        const char = source[i];
+        result += char;
+
+        // 空白处不追加隐藏字符；数字及其边界完全保留原样。
+        if (protectedIndex.has(i) || /\s/u.test(char) || /[0-9０-９]/u.test(char)) continue;
+        if (randomFloat() >= probability) continue;
+
+        const count = rand(1, maxRepeat);
+        for (let j = 0; j < count; j++) {
+            const selected = pick(chars);
+            result += selected.char;
+            if (!usedCodes.includes(selected.code)) usedCodes.push(selected.code);
+        }
+    }
+    return result;
+}
+
+/* =========================================================
+   内容解析
+   ========================================================= */
+
+/* =========================================================
+   HTML 结构随机化引擎
+   ---------------------------------------------------------
+   目标：
+   1. 每次生成重新洗牌；
+   2. 使用合法的 HTML 父子结构；
+   3. class / 属性顺序 / 引号 / CSS 顺序均可变化；
+   4. 不通过故意生成未闭合标签来制造变化；
+   5. before / after 作为 HTML fragment 规范化后再插入，
+      避免后置内容被错误地拼进按钮结构。
+   ========================================================= */
+
+const RANDOM_CLASS_NAMES = [
+    // 常见、自然的 kebab-case 命名
+    "content-area", "info-block", "detail-panel", "main-content",
+    "notice-area", "article-box", "message-body", "summary-block",
+    "content-panel", "detail-area", "notice-block", "summary-box",
+    "action-area", "message-wrap", "info-section", "primary-content",
+    "text-section", "article-content", "notice-content", "detail-content",
+    // 常见 camelCase 命名
+    "contentSection", "messageBody", "summaryBlock", "articlePanel",
+    "noticeContent", "detailSection", "infoPanel", "mainContent",
+    "contentArea", "messageSection", "articleBody", "summaryPanel",
+    // 也保留少量不规则但合法的既有风格
+    "asparagus", "adornedClarendon", "liabilitiesAddict", "unfair-seller",
+    "purple-elephant", "digital-nomad", "vintage-look", "mystic-river",
+    "shadow-walker"
+];
+
+// 每次生成单独维护，避免同一份输出中无意重复分配 class 名。
+let generationClassNames = new Set();
+
+function reserveClassName(preferred) {
+    if (preferred && !generationClassNames.has(preferred)) {
+        generationClassNames.add(preferred);
+        return preferred;
+    }
+
+    const available = RANDOM_CLASS_NAMES.filter(name => !generationClassNames.has(name));
+    if (available.length) {
+        const name = pick(available);
+        generationClassNames.add(name);
+        return name;
+    }
+
+    // 名称池用尽时，继续采用自然的语义命名，不使用统一 x-xxxxx 模式。
+    let index = generationClassNames.size + 1;
+    let candidate = `contentArea${index}`;
+    while (generationClassNames.has(candidate)) {
+        index++;
+        candidate = `contentArea${index}`;
+    }
+    generationClassNames.add(candidate);
+    return candidate;
+}
+
+const RANDOM_TAGS = [
+    "div",
+    "p",
+    "span",
+    "section"
+];
+
+function shuffleArray(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(randomFloat() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+}
+
+function randomClassName() {
+    const first = reserveClassName(pick(RANDOM_CLASS_NAMES));
+
+    // 少量元素使用双 class；两个名称都保证不重复。
+    if (randomFloat() < 0.24) {
+        const second = reserveClassName(pick(RANDOM_CLASS_NAMES));
+        return `${first} ${second}`;
+    }
+
+    return first;
+}
+
+function randomDynamicClass(prefix) {
+    // prefix 仅用于选择语义相近的名称，不再统一生成 x-xxxxx。
+    const semanticGroups = {
+        content: ["content-area", "contentSection", "main-content", "mainContent", "article-content"],
+        before: ["intro-section", "opening-content", "lead-content", "notice-area", "contentSection"],
+        after: ["closing-section", "footer-content", "summary-block", "summaryBlock", "detail-panel"]
+    };
+    const candidates = semanticGroups[prefix] || RANDOM_CLASS_NAMES;
+    return reserveClassName(pick(candidates));
+}
+
+function randomQuote() {
+    return randomFloat() < 0.5 ? '"' : "'";
+}
+
+function makeAttr(name, value) {
+    const actualName = randomFloat() < 0.5
+        ? name
+        : name.toUpperCase();
+    const quote = randomQuote();
+    return `${actualName}=${quote}${String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;")}${quote}`;
+}
+
+function buildAttributes(attributes) {
+    const list = shuffleArray(attributes);
+    return list.map(item => makeAttr(item[0], item[1])).join(" ");
+}
+
+function buildStyle(declarations) {
+    const list = shuffleArray(declarations.filter(Boolean));
+    return list.join("");
+}
+
+function injectUnicodeOutsideBrackets(text, usedCodes, bracketState = { insideBracket: false }) {
+    // 在整个前置/后置内容遍历期间共享括号状态，因此即使 [] 跨行或跨 HTML 文本节点，也不会在内部插入零宽字符。
+    let output = "";
+    let outside = "";
+
+    const flushOutside = () => {
+        if (outside) {
+            output += injectUnicodeTest(outside, usedCodes);
+            outside = "";
+        }
+    };
+
+    for (const ch of String(text)) {
+        if (ch === "[" && !bracketState.insideBracket) {
+            flushOutside();
+            bracketState.insideBracket = true;
+            output += ch;
+        } else if (ch === "]" && bracketState.insideBracket) {
+            output += ch;
+            bracketState.insideBracket = false;
+        } else if (bracketState.insideBracket) {
+            output += ch;
+        } else {
+            outside += ch;
+        }
+    }
+    flushOutside();
+    return output;
+}
+
+function escapeTextForHtml(text) {
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function formatReadableLine(line, bracketState, accentColor) {
+    // 拉丁字母、数字、常见编号/网址符号使用清晰的无衬线字体；
+    // [] 内部则原样转义，不套 span，避免打散括号内容。
+    let html = "";
+    let i = 0;
+    while (i < line.length) {
+        const ch = String.fromCodePoint(line.codePointAt(i));
+        const chLength = ch.length;
+
+        if (bracketState.insideBracket) {
+            html += escapeTextForHtml(ch);
+            i += chLength;
+            if (ch === "]") bracketState.insideBracket = false;
+            continue;
+        }
+
+        if (ch === "[") {
+            bracketState.insideBracket = true;
+            html += escapeTextForHtml(ch);
+            i += chLength;
+            continue;
+        }
+
+        const match = /^[A-Za-z0-9]+(?:[._/@:+%#-][A-Za-z0-9]+)*/.exec(line.slice(i));
+        if (match) {
+            const token = escapeTextForHtml(match[0]);
+            html += `<span style="font-family:Arial,Helvetica,sans-serif;color:${accentColor};font-weight:500;font-variant-numeric:lining-nums tabular-nums;font-feature-settings:'lnum' 1,'tnum' 1;letter-spacing:0;">${token}</span>`;
+            i += match[0].length;
+            continue;
+        }
+
+        html += escapeTextForHtml(ch);
+        i += chLength;
+    }
+    return html;
+}
+
+let generationTheme = null;
+let generationFrameMode = "single";
+let generationMaxWidth = 560;
+
+function buildPlainTextParagraphs(rawText) {
+    // 多套低饱和商务视觉主题：主题之间在底色、边框、装饰和版面气质上有明显区别，
+    // 但正文始终保持高可读性；不会为了装饰把段落拆成逐字样式。
+    const themes = [
+        { name: "navy-paper", body: "#252f3b", accent: "#294e70", surface: "#ffffff", canvas: "#f4f7fb", border: "#dfe7f0", rule: "#d9e3ed", rail: "#c8d8e8", shadow: "0 3px 12px rgba(31,52,76,0.055)" },
+        { name: "mist-blue", body: "#29343d", accent: "#315d78", surface: "#fbfdff", canvas: "#edf3f7", border: "#dce7ed", rule: "#d6e2e9", rail: "#bfd4e0", shadow: "0 2px 10px rgba(39,73,94,0.05)" },
+        { name: "slate", body: "#2b3036", accent: "#465d73", surface: "#ffffff", canvas: "#f3f5f7", border: "#e0e5e9", rule: "#e1e6eb", rail: "#cbd5de", shadow: "0 3px 10px rgba(35,43,52,0.045)" },
+        { name: "sage", body: "#29352f", accent: "#496657", surface: "#fcfdfb", canvas: "#f0f4ef", border: "#dce6dc", rule: "#dce5dc", rail: "#c7d8c9", shadow: "0 3px 11px rgba(42,73,53,0.045)" },
+        { name: "muted-teal", body: "#26363a", accent: "#35656a", surface: "#fbfdfd", canvas: "#eff5f5", border: "#d8e5e5", rule: "#d9e6e6", rail: "#bdd6d6", shadow: "0 3px 11px rgba(35,76,78,0.045)" },
+        { name: "warm-stone", body: "#35332f", accent: "#675b4d", surface: "#fffefa", canvas: "#f6f4ef", border: "#e7e1d7", rule: "#e9e3da", rail: "#d9cdbb", shadow: "0 3px 12px rgba(82,69,50,0.04)" },
+        { name: "graphite-sand", body: "#303237", accent: "#5b606b", surface: "#fdfdfc", canvas: "#f3f3f1", border: "#e2e2df", rule: "#e5e5e2", rail: "#d1d2ce", shadow: "0 2px 9px rgba(48,50,55,0.04)" },
+        { name: "smoke-lilac", body: "#302f3a", accent: "#625e7b", surface: "#fdfcff", canvas: "#f4f2f8", border: "#e2deed", rule: "#e4e0ee", rail: "#d2cce4", shadow: "0 3px 12px rgba(67,58,98,0.045)" },
+        { name: "dusty-blue", body: "#27323b", accent: "#3b5e76", surface: "#fcfdff", canvas: "#edf2f6", border: "#dbe3eb", rule: "#d8e1ea", rail: "#bfd0df", shadow: "0 2px 10px rgba(41,64,85,0.05)" },
+        { name: "olive-gray", body: "#34352f", accent: "#62684f", surface: "#fdfdf9", canvas: "#f3f4ed", border: "#e1e4d7", rule: "#e2e5d9", rail: "#d0d6bd", shadow: "0 3px 10px rgba(61,69,44,0.04)" },
+        { name: "muted-berry", body: "#363039", accent: "#725564", surface: "#fffdfd", canvas: "#f7f2f4", border: "#eadfe5", rule: "#ecE2e7".toLowerCase(), rail: "#decbd5", shadow: "0 3px 11px rgba(83,53,70,0.04)" },
+        { name: "blue-gray", body: "#29313a", accent: "#3b536a", surface: "#fcfdfe", canvas: "#eff2f5", border: "#dfe5eb", rule: "#e0e6ed", rail: "#c9d4df", shadow: "0 2px 9px rgba(39,55,72,0.045)" }
+    ];
+    const theme = generationTheme || (generationTheme = pick(themes));
+
+    // 字体族会成套选取，数字与拉丁字母始终优先清晰的 sans-serif 字形。
+    const paragraphFonts = [
+        "Arial, Helvetica, 'Yu Gothic', Meiryo, sans-serif",
+        "'Yu Gothic', Meiryo, Arial, sans-serif",
+        "'Noto Sans JP', 'Yu Gothic', Meiryo, sans-serif",
+        "Meiryo, 'Yu Gothic', Arial, sans-serif",
+        "'Hiragino Kaku Gothic ProN', Meiryo, sans-serif",
+        "'Yu Mincho', 'Hiragino Mincho ProN', serif"
+    ];
+    const font = pick(paragraphFonts);
+    const paragraphs = String(rawText).replace(/\r\n?/g, "\n").trim().split(/\n[ \t]*\n+/);
+    const sizes = shuffleArray(["10.5pt", "11pt", "11.5pt"]);
+    const bracketState = { insideBracket: false };
+
+    // 每块内容最多 1–2 个视觉分隔符；只有一段时不添加分隔符。
+    const separators = new Set();
+    const boundaryCount = Math.max(0, paragraphs.length - 1);
+    const separatorCount = boundaryCount === 0 ? 0 : Math.min(boundaryCount, 1 + (boundaryCount > 1 && randomFloat() < 0.58 ? 1 : 0));
+    const availableBoundaries = shuffleArray(Array.from({ length: boundaryCount }, (_, i) => i));
+    for (let i = 0; i < separatorCount; i++) separators.add(availableBoundaries[i]);
+
+    // 页面处理方式明显区分，但一律使用淡色、浅边框和低强度阴影。
+    const frames = [
+        { padding: "14px 16px", radius: "7px", border: `1px solid ${theme.border}`, shadow: theme.shadow, background: theme.surface, outer: `background-color:${theme.canvas};`, blur: true },
+        { padding: "13px 15px", radius: "3px", border: `1px solid ${theme.border}`, shadow: "none", background: theme.surface, outer: "", blur: false },
+        { padding: "15px 17px", radius: "10px", border: "1px solid rgba(150,165,180,0.22)", shadow: theme.shadow, background: theme.surface, outer: `background-color:${theme.canvas};`, blur: true },
+        { padding: "12px 14px", radius: "0", border: "0", shadow: "none", background: theme.surface, outer: `border-top:2px solid ${theme.rail};background-color:${theme.canvas};`, blur: false },
+        { padding: "14px 16px", radius: "5px", border: `1px solid ${theme.border}`, shadow: "0 1px 5px rgba(45,55,65,0.025)", background: theme.surface, outer: "", blur: false },
+        { padding: "14px 16px", radius: "8px", border: `1px solid ${theme.border}`, shadow: theme.shadow, background: `linear-gradient(145deg, ${theme.surface}, ${theme.canvas})`, outer: "", blur: true }
+    ];
+    // 同一封邮件共享同一套框架模式，前置/后置不会各自随机出不同底色。
+    const frame = generationFrameMode === "three"
+        ? { padding: "14px 16px", radius: "0", border: "0", shadow: "none", background: theme.surface, outer: `border-top:1px solid ${theme.rail};border-bottom:1px solid ${theme.rail};`, blur: false }
+        : generationFrameMode === "two"
+            ? { padding: "14px 16px", radius: "6px", border: `1px solid ${theme.border}`, shadow: theme.shadow, background: theme.surface, outer: "", blur: false }
+            : { padding: "12px 0", radius: "0", border: "0", shadow: "none", background: theme.surface, outer: "", blur: false };
+
+    const separatorStyles = [
+        () => `<div role="separator" aria-hidden="true" style="height:1px;border-top:1px solid ${theme.rule};margin:11px 2px;line-height:1px;font-size:1px;"></div>`,
+        () => `<div role="separator" aria-hidden="true" style="height:1px;width:46px;background:${theme.rail};margin:12px 0 12px 1px;line-height:1px;font-size:1px;"></div>`,
+        () => `<div role="separator" aria-hidden="true" style="height:1px;background:linear-gradient(90deg,${theme.rail},${theme.rule} 48%,transparent);margin:12px 0;line-height:1px;font-size:1px;"></div>`,
+        () => `<div role="separator" aria-hidden="true" style="height:1px;border-top:1px dotted ${theme.rail};margin:11px 2px;line-height:1px;font-size:1px;"></div>`,
+        () => `<div role="separator" aria-hidden="true" style="margin:11px 0;color:${theme.rail};font-size:9pt;line-height:1;text-align:left;letter-spacing:2px;">· · ·</div>`,
+        () => `<div role="separator" aria-hidden="true" style="height:2px;width:28px;background:${theme.rail};border-radius:2px;margin:12px 0;line-height:1px;font-size:1px;"></div>`
+    ];
+    const separatorMarkup = pick(separatorStyles);
+
+    const emphasisIndex = paragraphs.length > 1 && randomFloat() < 0.82
+        ? Math.floor(randomFloat() * paragraphs.length)
+        : -1;
+    const paragraphVariants = ["plain", "rail", "soft", "topline", "letterpress"];
+    const selectedParagraphVariant = pick(paragraphVariants);
+
+    const blocks = paragraphs.map((paragraph, index) => {
+        const isEmphasis = index === emphasisIndex;
+        const lines = paragraph.split("\n")
+            .map(line => formatReadableLine(line, bracketState, theme.accent))
+            .join("<br>\n");
+        const size = sizes[index % sizes.length];
+        const weight = isEmphasis ? pick(["500", "600"]) : pick(["400", "400", "500"]);
+        const italic = !isEmphasis && randomFloat() < 0.025 ? "font-style:italic;" : "";
+        const letterSpacing = pick(["normal", "0.003em", "0.006em"]);
+        let decoration = "";
+        let padding = "0";
+        let margin = "0";
+        let background = "transparent";
+        let borderRadius = "0";
+
+        if (isEmphasis && selectedParagraphVariant === "rail") {
+            decoration = `border-left:2px solid ${theme.rail};padding-left:10px;`;
+        } else if (isEmphasis && selectedParagraphVariant === "soft") {
+            background = theme.canvas;
+            padding = "8px 10px";
+            borderRadius = "4px";
+        } else if (isEmphasis && selectedParagraphVariant === "topline") {
+            decoration = `border-top:1px solid ${theme.rule};padding-top:7px;`;
+        } else if (isEmphasis && selectedParagraphVariant === "letterpress") {
+            decoration = `border-left:3px solid ${theme.rail};padding-left:9px;`;
+            background = theme.canvas;
+            padding = "7px 9px";
+            borderRadius = "2px";
+        }
+        if (isEmphasis && background !== "transparent") margin = "0 0 2px 0";
+        else if (index < paragraphs.length - 1 && !separators.has(index)) margin = "0 0 9px 0";
+
+        return `<p style="box-sizing:border-box;margin:${margin};padding:${padding};background:${background};border-radius:${borderRadius};font-size:${size};font-family:${font};color:${theme.body};font-weight:${weight};${italic}line-height:1.72;letter-spacing:${letterSpacing};text-align:left;font-variant-numeric:proportional-nums;${decoration}">${lines}</p>`;
+    });
+
+    const joinedParts = [];
+    blocks.forEach((block, index) => {
+        joinedParts.push(block);
+        if (index < blocks.length - 1) {
+            joinedParts.push(separators.has(index) ? separatorMarkup() : "");
+        }
+    });
+    const blur = frame.blur ? "backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);" : "";
+    const style = `box-sizing:border-box;margin:0;padding:${frame.padding};background:${frame.background};border:${frame.border};border-radius:${frame.radius};box-shadow:${frame.shadow};${blur}${frame.outer}`;
+    return `<div style="${style}">${joinedParts.join("")}</div>`;
+}
+
+function normalizeHtmlFragment(rawText, usedCodes) {
+    if (!rawText || !String(rawText).trim()) return "";
+    // 测试内容始终按“用户文字”处理：绝不让 <table>、</div>、<p> 等测试字符串
+    // 被 DOMParser 当成真实标签解析，从根源上避免内容消失或结构被吞掉。
+    return String(rawText).replace(/\r\n?/g, "\n").trim();
+}
+
+function buildBeautifiedParagraphs(rawText, usedCodes) {
+    if (!generationTheme) {
+        generationTheme = pick([
+            {body:"#252f3b",accent:"#294e70",surface:"#ffffff",canvas:"#f4f7fb",border:"#dfe7f0",rule:"#d9e3ed",rail:"#c8d8e8",shadow:"0 3px 12px rgba(31,52,76,.055)"},
+            {body:"#29343d",accent:"#315d78",surface:"#fbfdff",canvas:"#edf3f7",border:"#dce7ed",rule:"#d6e2e9",rail:"#bfd4e0",shadow:"0 2px 10px rgba(39,73,94,.05)"},
+            {body:"#2b3036",accent:"#465d73",surface:"#ffffff",canvas:"#f3f5f7",border:"#e0e5e9",rule:"#e1e6eb",rail:"#cbd5de",shadow:"0 3px 10px rgba(35,43,52,.045)"},
+            {body:"#29352f",accent:"#496657",surface:"#fcfdfb",canvas:"#f0f4ef",border:"#dce6dc",rule:"#dce5dc",rail:"#c7d8c9",shadow:"0 3px 11px rgba(42,73,53,.045)"},
+            {body:"#26363a",accent:"#35656a",surface:"#fbfdfd",canvas:"#eff5f5",border:"#d8e5e5",rule:"#d9e6e6",rail:"#bdd6d6",shadow:"0 3px 11px rgba(35,76,78,.045)"},
+            {body:"#35332f",accent:"#675b4d",surface:"#fffefa",canvas:"#f6f4ef",border:"#e7e1d7",rule:"#e9e3da",rail:"#d9cdbb",shadow:"0 3px 12px rgba(82,69,50,.04)"},
+            {body:"#302f3a",accent:"#625e7b",surface:"#fdfcff",canvas:"#f4f2f8",border:"#e2deed",rule:"#e4e0ee",rail:"#d2cce4",shadow:"0 3px 12px rgba(67,58,98,.045)"},
+            {body:"#29313a",accent:"#3b536a",surface:"#fcfdfe",canvas:"#eff2f5",border:"#dfe5eb",rule:"#e0e6ed",rail:"#c9d4df",shadow:"0 2px 9px rgba(39,55,72,.045)"}
+        ]);
+    }
+    const theme = generationTheme;
+    const paragraphFonts = [
+        "Arial, Helvetica, 'Yu Gothic', Meiryo, sans-serif",
+        "'Yu Gothic', Meiryo, Arial, sans-serif",
+        "'Noto Sans JP', 'Yu Gothic', Meiryo, sans-serif",
+        "Meiryo, 'Yu Gothic', Arial, sans-serif",
+        "'Hiragino Kaku Gothic ProN', Meiryo, sans-serif",
+        "'Yu Mincho', 'Hiragino Mincho ProN', serif"
+    ];
+    const font = pick(paragraphFonts);
+    const normalized = String(rawText).replace(/\r\n?/g, "\n");
+    // 空行分段；段内单换行保留为 <br>，不会把用户的原始层次挤成一行。
+    const paragraphs = normalized.split(/\n[ \t]*\n+/)
+        .map(x => x.trim())
+        .filter(Boolean);
+    if (!paragraphs.length) return "";
+
+    const sizes = shuffleArray(["10.5pt", "11pt", "11.5pt"]);
+    const bracketState = { insideBracket:false };
+    const separators = new Set();
+    const boundaryCount = Math.max(0, paragraphs.length - 1);
+    const separatorCount = boundaryCount === 0 ? 0 : Math.min(
+        boundaryCount,
+        1 + (boundaryCount > 1 && randomFloat() < 0.58 ? 1 : 0)
+    );
+    shuffleArray(Array.from({length:boundaryCount},(_,i)=>i))
+        .slice(0, separatorCount).forEach(i=>separators.add(i));
+
+    const separatorStyles = [
+        () => `<div role="separator" aria-hidden="true" style="height:1px;border-top:1px solid ${theme.rule};margin:11px 2px;line-height:1px;font-size:1px;"></div>`,
+        () => `<div role="separator" aria-hidden="true" style="height:1px;width:46px;background:${theme.rail};margin:12px 0 12px 1px;line-height:1px;font-size:1px;"></div>`,
+        () => `<div role="separator" aria-hidden="true" style="height:1px;background:linear-gradient(90deg,${theme.rail},${theme.rule} 48%,transparent);margin:12px 0;line-height:1px;font-size:1px;"></div>`,
+        () => `<div role="separator" aria-hidden="true" style="height:1px;border-top:1px dotted ${theme.rail};margin:11px 2px;line-height:1px;font-size:1px;"></div>`,
+        () => `<div role="separator" aria-hidden="true" style="margin:11px 0;color:${theme.rail};font-size:9pt;line-height:1;text-align:left;letter-spacing:2px;">· · ·</div>`,
+        () => `<div role="separator" aria-hidden="true" style="height:2px;width:28px;background:${theme.rail};border-radius:2px;margin:12px 0;line-height:1px;font-size:1px;"></div>`
+    ];
+    const separatorMarkup = pick(separatorStyles);
+    const emphasisIndex = paragraphs.length > 1 && randomFloat() < 0.82
+        ? Math.floor(randomFloat() * paragraphs.length) : -1;
+    const paragraphVariants = ["plain","rail","soft","topline","letterpress"];
+    const selectedParagraphVariant = pick(paragraphVariants);
+
+    const blocks = paragraphs.map((paragraph,index)=>{
+        const isEmphasis = index === emphasisIndex;
+        const lines = paragraph.split("\n")
+            .map(line => formatReadableLine(
+                injectUnicodeOutsideBrackets(line, usedCodes, bracketState),
+                {insideBracket:false}, theme.accent, true
+            ))
+            .join("<br>\n");
+        const size = sizes[index % sizes.length];
+        const weight = isEmphasis ? pick(["500","600"]) : pick(["400","400","500"]);
+        const italic = !isEmphasis && randomFloat() < .025 ? "font-style:italic;" : "";
+        const letterSpacing = pick(["normal","0.003em","0.006em"]);
+        let decoration="", padding="0", margin="0", background="transparent", borderRadius="0";
+        if(isEmphasis && selectedParagraphVariant==="rail"){
+            decoration=`border-left:2px solid ${theme.rail};padding-left:10px;`;
+        }else if(isEmphasis && selectedParagraphVariant==="soft"){
+            background=theme.canvas; padding="8px 10px"; borderRadius="4px";
+        }else if(isEmphasis && selectedParagraphVariant==="topline"){
+            decoration=`border-top:1px solid ${theme.rule};padding-top:7px;`;
+        }else if(isEmphasis && selectedParagraphVariant==="letterpress"){
+            decoration=`border-left:3px solid ${theme.rail};padding-left:9px;`;
+            background=theme.canvas; padding="7px 9px"; borderRadius="2px";
+        }
+        if(isEmphasis && background!=="transparent") margin="0 0 2px 0";
+        else if(index<paragraphs.length-1 && !separators.has(index)) margin="0 0 9px 0";
+        return `<p style="box-sizing:border-box;margin:${margin};padding:${padding};background:${background};border-radius:${borderRadius};font-size:${size};font-family:${font};color:${theme.body};font-weight:${weight};${italic}line-height:1.72;letter-spacing:${letterSpacing};text-align:left;font-variant-numeric:proportional-nums;${decoration}">${lines}</p>`;
+    });
+    const joined=[];
+    blocks.forEach((block,index)=>{
+        joined.push(block);
+        if(index<blocks.length-1) joined.push(separators.has(index)?separatorMarkup():"");
+    });
+    return joined.join("");
+}
+
+function createContentStructure(rawText, usedCodes, position) {
+    const normalized = normalizeHtmlFragment(rawText, usedCodes);
+    if (!normalized) return "";
+
+    const firstClass = randomClassName();
+    const secondClass = randomClassName();
+    const outerClass = randomDynamicClass(position === "before" ? "before" : "after");
+    const content = buildBeautifiedParagraphs(normalized, usedCodes);
+
+    // 同一封邮件共享统一底色与框架模式；只改变容器层级，不改变段落美化。
+    const theme = generationTheme;
+    const frame = generationFrameMode === "three"
+        ? {padding:"14px 16px",radius:"0",border:"0",shadow:"none",background:theme.surface,outer:`border-top:1px solid ${theme.rail};border-bottom:1px solid ${theme.rail};`}
+        : generationFrameMode === "two"
+            ? {padding:"14px 16px",radius:"6px",border:`1px solid ${theme.border}`,shadow:theme.shadow,background:theme.surface,outer:""}
+            : {padding:"12px 0",radius:"0",border:"0",shadow:"none",background:theme.surface,outer:""};
+    const frameStyle = `box-sizing:border-box;margin:0;padding:${frame.padding};background:${frame.background};border:${frame.border};border-radius:${frame.radius};box-shadow:${frame.shadow};${frame.outer}`;
+
+    const simple = () => `<div ${buildAttributes([["class",outerClass],["data-block",secondClass],["style",frameStyle]])}>${content}</div>`;
+    const nested = () => `<div ${buildAttributes([["class",outerClass],["style",frameStyle]])}><div ${buildAttributes([["class",firstClass],["style","margin:0;padding:0;"]])}>${content}</div></div>`;
+    const section = () => `<section ${buildAttributes([["class",outerClass]])}><div ${buildAttributes([["class",firstClass],["style",frameStyle]])}>${content}</div></section>`;
+    const table = () => `<table ${buildAttributes([["width","100%"],["role","presentation"],["class",outerClass],["style","border-collapse:collapse;"]])}><tbody><tr><td ${buildAttributes([["class",firstClass],["align","left"],["style",`padding:0;${frame.outer}`]])}><div ${buildAttributes([["class",secondClass],["style",frameStyle]])}>${content}</div></td></tr></tbody></table>`;
+    const tableDiv = () => `<table ${buildAttributes([["width","100%"],["role","presentation"],["class",outerClass]])}><tbody><tr><td ${buildAttributes([["align","left"],["class",firstClass],["style","padding:0;"]])}><div ${buildAttributes([["class",secondClass],["style",frameStyle]])}>${content}</div></td></tr></tbody></table>`;
+
+    return pick([simple,nested,section,table,tableDiv])();
+}
+
+function createButtonStructure(targetUrl, buttonText, usedCodes) {
+    // 按钮文字作为普通文本处理，保留多行显示
+    const processedButtonText = escapeHtml(
+        String(buttonText ?? "")
+    ).replace(/\r\n?/g, "\n").replace(/\n/g, "<br>\n");
+    // 检查是否启用了功能3：邮件多层网格降级 (HTML Table Pixel Graphics)
+    if (document.getElementById("enablePixelGrid")?.checked) {
+        const randId = Math.floor(10000 + randomFloat() * 90000);
+        return `<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:${generationMaxWidth}px; margin:0 auto; border-collapse:collapse;">
+    <tr>
+        <td align="center" style="padding: 10px 0;">
+            <div class="pixel-graphics-wrapper" style="background-color:#236CDA; border-radius:6px; padding:14px 24px; text-align:center; box-sizing:border-box; width:100%;">
+                <a id="btn_dynamic_${randId}" href="${targetUrl}" aria-label="詳細の確認" style="color:#ffffff; font-family:'Helvetica Neue',Arial,'Hiragino Kaku Gothic ProN','Meiryo',sans-serif; font-size:16px; font-weight:bold; line-height:1.5; text-decoration:none; display:block; width:100%; overflow-wrap:anywhere; -webkit-text-size-adjust:none;">
+                    ${processedButtonText}
+                </a>
+            </div>
+        </td>
+    </tr>
+</table>`;
+    }
+
+    // --- 若未勾选网格降级，则降级继承并执行您原有的多态架构（保障100%原味逻辑） ---
+    const fonts = ["Arial, Helvetica, 'Yu Gothic', Meiryo, sans-serif", "'Yu Gothic', Meiryo, Arial, sans-serif", "'Noto Sans JP', 'Yu Gothic', Meiryo, sans-serif", "Meiryo, 'Yu Gothic', Arial, sans-serif"];
+    const colors = ["#3B57DF", "#1F5BBE", "rgb(67,133,224)", "rgb(63,127,224)", "#236CDA", "#1e4bb0", "#2866d3"];
+    const bg = pick(colors);
+    const font = pick(fonts);
+    const radius = pick(["0px", "4px", "6px", "8px"]);
+    const sizeStyles = [
+        ["display:block;", "text-decoration:none;", "text-align:center;", "font-size:11.5pt;", "line-height:1.45;", "padding:12px 24px;", "box-sizing:border-box;"],
+        ["padding:13px 26px;", "font-size:12pt;", "line-height:1.45;", "display:block;", "box-sizing:border-box;", "text-align:center;", "text-decoration:none;"],
+        ["padding:12px 20px;", "font-size:12pt;", "line-height:1.45;", "display:block;", "text-align:center;", "text-decoration:none;", "box-sizing:border-box;"],
+        ["width:100%;", "padding:12px 0;", "font-size:11.5pt;", "line-height:1.45;", "display:block;", "text-align:center;", "text-decoration:none;", "box-sizing:border-box;"]
+    ];
+
+    const buttonStyle = buildStyle([
+        `background-color:${bg};`, "color:#fff;", "font-weight:700;", "letter-spacing:0.01em;",
+        "font-variant-numeric:lining-nums tabular-nums;", "font-feature-settings:'lnum' 1,'tnum' 1;",
+        "text-shadow:0 1px 1px rgba(0,0,0,0.16);", "border:none;", `border-radius:${radius};`, `font-family:${font};`, ...pick(sizeStyles)
+    ]);
+
+    const anchorClass = randomClassName();
+    const wrapperClass = randomClassName();
+    const dynamicClass = randomDynamicClass("action");
+    const anchor = `<a ${buildAttributes([["href", targetUrl], ["class", anchorClass], ["style", buttonStyle], ["data-action", dynamicClass]])}>${processedButtonText}</a>`;
+
+    const makeDiv = () => `<div ${buildAttributes([["class", wrapperClass], ["style", "margin:6px;padding:3px;"]])}>${anchor}</div>`;
+    const makeP = () => `<p ${buildAttributes([["class", wrapperClass], ["style", "margin:12px 0;padding:0;"]])}>${anchor}</p>`;
+    const makeSectionDiv = () => `<section ${buildAttributes([["class", wrapperClass]])}><div ${buildAttributes([["class", randomClassName()], ["style", "margin:6px 0;padding:0;"]])}>${anchor}</div></section>`;
+    const makeTable = () => `<table ${buildAttributes([["width", "100%"], ["role", "presentation"], ["class", wrapperClass], ["style", "border-collapse:collapse;"]])}><tbody><tr><td ${buildAttributes([["class", randomClassName()], ["align", "center"], ["style", "padding:0;"]])}>${anchor}</td></tr></tbody></table>`;
+    const makeTableNested = () => `<table ${buildAttributes([["width", "100%"], ["role", "presentation"], ["class", wrapperClass]])}><tbody><tr><td ${buildAttributes([["align", "center"], ["class", randomClassName()], ["style", "padding:0;"]])}><div ${buildAttributes([["class", randomClassName()], ["style", "margin:0;padding:0;"]])}>${anchor}</div></td></tr></tbody></table>`;
+
+    return pick([makeDiv, makeP, makeSectionDiv, makeTable, makeTableNested])();
+}
+
+/* =========================================================
+   单个 HTML 生成器
+   ========================================================= */
+function generateTemplate() {
+    const beforeRaw =
+        document.getElementById("beforeContent").value;
+
+    const afterRaw =
+        document.getElementById("afterContent").value;
+
+    let targetUrl =
+        document.getElementById("targetUrl").value.trim();
+
+    // 不 trim 整段文本，以保留用户输入的多行排版；仅用 trim 判断是否为空。
+    let btnText =
+        document.getElementById("buttonText").value;
+
+    if (!targetUrl) {
+        targetUrl = "%{AUTOVALS1}";
+    }
+
+    if (!btnText.trim()) {
+        btnText = "■ご利用明細を確認";
+    }
+
+    const usedCodes = [];
+    // 每次合成重置 class 登记表，确保本次输出的命名检查相互独立。
+    generationClassNames = new Set();
+    // 每封邮件只抽取一次配色与整体框架模式，前置/后置共享，确保底色统一。
+    generationTheme = null;
+    generationFrameMode = pick(["single", "two", "three"]);
+
+    // HTML 最大宽度支持固定值（560）或范围（500-560）；每封生成结果只抽取一次宽度。
+    const widthText = String(document.getElementById("maxWidth").value || "500-560").trim();
+    const widthMatch = widthText.match(/^(\d{1,4})(?:\s*[-~至到]\s*(\d{1,4}))?$/);
+    let widthMin = 500, widthMax = 560;
+    if (widthMatch) {
+        widthMin = Math.max(300, Math.min(1000, Number(widthMatch[1])));
+        widthMax = widthMatch[2] ? Math.max(300, Math.min(1000, Number(widthMatch[2]))) : widthMin;
+        if (widthMin > widthMax) [widthMin, widthMax] = [widthMax, widthMin];
+    }
+    generationMaxWidth = rand(widthMin, widthMax);
+
+    /* -----------------------------------------
+       前置内容：独立随机结构
+       ----------------------------------------- */
+    const before = createContentStructure(
+        beforeRaw,
+        usedCodes,
+        "before"
+    );
+
+    /* -----------------------------------------
+       后置内容：独立随机结构
+       ----------------------------------------- */
+    const after = createContentStructure(
+        afterRaw,
+        usedCodes,
+        "after"
+    );
+
+    /* -----------------------------------------
+       页面级随机参数
+       ----------------------------------------- */
+    const fonts = [
+        "Arial, sans-serif",
+        "'Yu Gothic', sans-serif",
+        "'Noto Sans JP', sans-serif",
+        "Meiryo, sans-serif",
+        "'MS PGothic', sans-serif"
+    ];
+
+    // 页面基准字号固定在 11pt；正文段落使用 10.5–11.5pt 的窄区间，最大差距不超过 1pt。
+    const fontSizes = ["11pt"];
+
+    const font = pick(fonts);
+    const fontSize = pick(fontSizes);
+
+    const maxWidth = generationMaxWidth;
+
+    const bodyStyle = buildStyle([
+        `font-size:${fontSize};`,
+        `font-family:${font};`,
+        "margin:0;",
+        "padding:10px;",
+        `background:${generationTheme ? generationTheme.surface : "#fff"};`
+    ]);
+
+    const outerClass = randomDynamicClass("content");
+    const outerClass2 = randomClassName();
+
+    /* -----------------------------------------
+       完整 HTML 文档：整合文档头随机生成器核心
+       始终输出单一 HTML5 + UTF-8 文档，避免声明与实际编码不一致。
+       ----------------------------------------- */
+    // lang 属性表达方式做安全变化；不混入与实际字节编码不一致的声明。
+    const langValue = pick(["ja", "ja-JP", "ja-Jpan", "ja-Jpan-JP"]);
+    const langAttrName = pick(["lang", "lang", "LANG"]);
+    const langQuote = randomFloat() < 0.5 ? '"' : "'";
+    const langMarkup = langAttrName + (randomFloat() < 0.5 ? "=" : " = ") + langQuote + langValue + langQuote;
+
+    // 标题不再使用固定日语句子，而是按字符随机混合平假名与片假名。
+    // 字符实体选项仍然有效，实体只改变源码写法，不改变显示字符。
+    const hiragana = Array.from("あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをんがぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽぁぃぅぇぉゃゅょっー");
+    const katakana = Array.from("アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポァィゥェォャュョッー");
+    const kanaLength = 8 + Math.floor(randomFloat() * 17);
+    const titleRaw = Array.from({length:kanaLength}, () => pick(randomFloat() < 0.5 ? hiragana : katakana)).join("");
+    const titleText = (!document.getElementById("headTitleEntities") || document.getElementById("headTitleEntities").checked)
+        ? Array.from(titleRaw).map(ch => randomFloat() < 0.22 ? `&#${ch.codePointAt(0)};` : ch).join("")
+        : escapeHtml(titleRaw);
+
+    const metaPool = [
+        ["name", "viewport", "content", "width=device-width,initial-scale=1"],
+        ["name", "format-detection", "content", "telephone=no,address=no,email=no,date=no"],
+        ["name", "color-scheme", "content", "light dark"],
+        ["name", "supported-color-schemes", "content", "light dark"],
+        ["name", "referrer", "content", "origin"],
+        ["name", "robots", "content", "noindex,nofollow"],
+        ["name", "x-apple-disable-message-reformatting", "content", "true"]
+    ];
+    const density = document.getElementById("headMetaDensity").value;
+    const metaCount = density === "light" ? 1 : density === "rich" ? metaPool.length : 3;
+    const selectedMeta = shuffleArray(metaPool).slice(0, metaCount);
+    const metaMarkup = selectedMeta.map(([a, av, b, bv]) => {
+        const attrs = randomFloat() < 0.5
+            ? buildAttributes([[a, av], [b, bv]])
+            : buildAttributes([[b, bv], [a, av]]);
+        return `<meta ${attrs}>`;
+    });
+    if (randomFloat() < 0.65) {
+        metaMarkup.push(`<meta ${buildAttributes([["http-equiv", "X-UA-Compatible"], ["content", "IE=edge"]])}>`);
+    }
+
+    // 头部 CSS 作为补充样式，不覆盖前后内容统一左对齐的规则。
+    const headCssMode = document.getElementById("headCssMode").value;
+    const actualHeadCssMode = headCssMode === "random"
+        ? pick(["minimal", "button", "text"]) : headCssMode;
+    const headCssColors = ["#233DD9", "#1e4bb0", "#2757a5", "#3949ab", "#34495e"];
+    const headCssColor = pick(headCssColors);
+    const headCssFont = pick(["Arial, sans-serif", "Meiryo, sans-serif", "'Yu Gothic', sans-serif", "'MS PGothic', sans-serif"]);
+    const headCssRules = [
+        `.${outerClass} { max-width:${maxWidth}px; width:100%; }`,
+        `.${outerClass2} { margin:0; padding:0; }`
+    ];
+    if (actualHeadCssMode === "button") {
+        headCssRules.push(`a { overflow-wrap:anywhere; }`);
+    } else if (actualHeadCssMode === "text") {
+        headCssRules.push(`body { line-height:${pick([1.5, 1.6, 1.7, 1.8])}; }`);
+    } else {
+        headCssRules.push(`body { font-family:${headCssFont}; }`);
+    }
+    const titleMarkup = `<title>${titleText}</title>`;
+    const styleMarkup = `<style type="text/css">\n${headCssRules.join("\n")}\n</style>`;
+    // 字符编码声明采用多种等价写法，但始终与实际下载文件的 UTF-8 编码一致。
+    // 不输出 EUC-JP / Shift_JIS 声明，除非文件本身真的按对应编码写出。
+    const charsetVariants = [
+        '<meta charset="UTF-8">',
+        '<meta charset=utf-8>',
+        '<meta charset = "utf-8">',
+        '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">',
+        '<meta content="text/html; charset=utf-8" http-equiv="Content-Type">'
+    ];
+    const charsetItem = pick(charsetVariants);
+    const headItems = [
+        ...metaMarkup,
+        titleMarkup,
+        styleMarkup
+    ];
+    // 编码声明固定在 head 前部；其余项目可随机排序。
+    const shuffledHeadItems = shuffleArray(headItems);
+
+    // 文档类型声明随机化：保留现代 HTML5，并加入常见历史 HTML 4.01 / XHTML 声明。
+    // 注意：本工具最终以 text/html 的 HTML 解析器规范化文档；选择 XHTML DOCTYPE
+    // 只代表测试声明变化，不代表输出会自动成为严格 XML/XHTML 文档。
+    const doctypeVariants = [
+        '<!DOCTYPE html>',
+        '<!DOCTYPE HTML>',
+        '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">',
+        '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">',
+        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">',
+        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">',
+        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">'
+    ];
+    const selectedDoctype = pick(doctypeVariants);
+
+    let html = `${selectedDoctype}
+<html ${langMarkup}>
+<head>
+${charsetItem}
+${shuffledHeadItems.join("\n")}
+</head>
+<body ${makeAttr("style", bodyStyle)}>
+<div ${buildAttributes([
+        ["class", outerClass],
+        ["style", `max-width:${maxWidth}px;width:100%;`],
+        ["data-container", outerClass2]
+    ])}>
+${before ? before + "\n" : ""}
+
+${createButtonStructure(targetUrl, btnText, usedCodes)}
+
+${after ? after + "\n" : ""}
+</div>
+
+<br><br>
+
+</body>
+</html>`;
+
+    // 不再使用 DOMParser 重新整理正文：用户输入可能包含“</table>”等测试字符串，
+    // 重新解析会把它们误认为 HTML 标签。生成器本身已经保证所有结构模板闭合。
+    // 仅压缩标签之间的结构性换行，不改写正文文本、换行和段落内容。
+    html = html.replace(/>[ \t]*\r?\n[ \t]*</g, "><");
+
+    return {
+        html: html,
+        usedCodes: Array.from(new Set(usedCodes))
+    };
+}
+
+
+/* =========================================================
+   单次生成
+   ========================================================= */
+
+function synthesizeTemplate() {
+
+    setRandomSeed(document.getElementById("randomSeed")?.value || "");
+    const start =
+        performance.now();
+
+
+    try {
+
+        const result =
+            generateTemplate();
+
+
+        const output =
+            result.html;
+
+
+        document.getElementById(
+            "codeOutput"
+        ).value =
+            output;
+
+
+        document.getElementById(
+            "previewIframe"
+        ).srcdoc =
+            output;
+
+
+        const elapsed =
+            performance.now() -
+            start;
+
+
+        document.getElementById(
+            "statChars"
+        ).textContent =
+            result.usedCodes.length;
+
+
+        document.getElementById(
+            "statLength"
+        ).textContent =
+            output.length;
+
+
+        document.getElementById(
+            "statBytes"
+        ).textContent =
+            formatBytes(
+                new Blob([output]).size
+            );
+
+
+        document.getElementById(
+            "statTime"
+        ).textContent =
+            elapsed.toFixed(3) +
+            " ms";
+
+
+
+        writeLog(
+            result,
+            output,
+            elapsed
+        );
+
+    } catch (error) {
+
+        writeLogError(error);
+
+        console.error(error);
+    }
+}
+
+
+/* =========================================================
+   批量生成
+   ========================================================= */
+
+async function batchGenerateAndExport() {
+
+    setRandomSeed(document.getElementById("randomSeed")?.value || "");
+    const countInput =
+        document.getElementById("exportCount");
+
+    const count =
+        parseInt(countInput.value, 10);
+
+    if (!Number.isFinite(count) || count < 1) {
+        alert("请输入大于 0 的生成数量。");
+        countInput.focus();
+        return;
+    }
+
+    const button = document.getElementById("exportButton");
+    const progressWrap = document.getElementById("progressWrap");
+    const progressBar = document.getElementById("progressBar");
+    const progressText = document.getElementById("progressText");
+
+    button.disabled = true;
+    progressWrap.style.display = "block";
+    progressBar.style.width = "0%";
+
+    const startAll = performance.now();
+    const outputParts = ["\uFEFF"];
+    let totalBytes = 0;
+    let totalChars = 0;
+    const characterStatistics = {};
+
+    try {
+        for (let i = 1; i <= count; i++) {
+            const result = generateTemplate();
+            const html = result.html.trimEnd();
+
+            /*
+             * 输出格式与 contentlist.txt 保持一致：
+             * True
+             * 1
+             * ------------------LINE-----------------
+             * [完整 HTML]
+             * ------------------CONTENTLINE-----------------
+             *
+             * 所有记录连续写入同一个 contentlist.txt，
+             * 不再将每条记录拆成独立 HTML 文件。
+             */
+            outputParts.push(
+                "True\n1\n" +
+                "------------------LINE-----------------" +
+                html +
+                "------------------CONTENTLINE-----------------"
+            );
+
+            totalBytes += new Blob([html]).size;
+            totalChars += html.length;
+
+            result.usedCodes.forEach(code => {
+                characterStatistics[code] =
+                    (characterStatistics[code] || 0) + 1;
+            });
+
+            const percent = Math.round(i / count * 100);
+            progressBar.style.width = percent + "%";
+            progressText.textContent =
+                `正在生成并合并：${i} / ${count}（${percent}%）`;
+
+            if (i % 25 === 0) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+        }
+
+        const combinedText = outputParts.join("").replace(/\r?\n/g, "\r\n");
+        const elapsedAll = performance.now() - startAll;
+        const blob = new Blob(
+            [combinedText],
+            { type: "text/plain;charset=utf-8" }
+        );
+
+        downloadBlob(blob, "contentlist.txt");
+
+        progressBar.style.width = "100%";
+        progressText.textContent =
+            `完成：已将 ${count} 条 HTML 连续写入 contentlist.txt。`;
+
+        const reportLines = [
+            "批量生成完成",
+            "",
+            "输出文件：contentlist.txt",
+            "生成数量：" + count,
+            "HTML 总字符数：" + totalChars,
+            "HTML 总大小：" + formatBytes(totalBytes),
+            "合并文档大小：" + formatBytes(blob.size),
+            "耗时：" + elapsedAll.toFixed(3) + " ms",
+            "",
+            "所有记录均写入同一个文档，格式为：",
+            "True",
+            "1",
+            "------------------LINE-----------------",
+            "[完整 HTML 内容]",
+            "------------------CONTENTLINE-----------------",
+            "",
+            "已自动下载 contentlist.txt。"
+        ];
+
+        writeSimpleLog(reportLines.join("\n"));
+
+    } catch (error) {
+        progressText.textContent = "生成失败：" + error.message;
+        writeLogError(error);
+        console.error(error);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+
+/* =========================================================
+   ZIP 生成
+   不依赖第三方 JS 库。
+   使用 STORE 模式创建标准 ZIP。
+   ========================================================= */
+
+function createZip(files) {
+
+    return new Promise(
+        (resolve, reject) => {
+
+            try {
+
+                const chunks = [];
+
+                const central = [];
+
+                let offset = 0;
+
+
+                for (const file of files) {
+
+                    const nameBytes =
+                        new TextEncoder()
+                            .encode(file.name);
+
+
+                    const dataBytes =
+                        new TextEncoder()
+                            .encode(file.content);
+
+
+                    const crc =
+                        crc32(dataBytes);
+
+
+                    const local =
+                        createLocalHeader(
+                            nameBytes,
+                            dataBytes.length,
+                            crc
+                        );
+
+
+                    chunks.push(
+                        local
+                    );
+
+
+                    chunks.push(
+                        dataBytes
+                    );
+
+
+                    const centralHeader =
+                        createCentralHeader(
+                            nameBytes,
+                            dataBytes.length,
+                            crc,
+                            offset
+                        );
+
+
+                    central.push(
+                        centralHeader
+                    );
+
+
+                    offset +=
+                        local.length +
+                        dataBytes.length;
+                }
+
+
+                const centralSize =
+                    central.reduce(
+                        (sum, x) =>
+                            sum + x.length,
+                        0
+                    );
+
+
+                const end =
+                    createEndRecord(
+                        files.length,
+                        centralSize,
+                        offset
+                    );
+
+
+                const allParts =
+                    chunks
+                        .concat(central)
+                        .concat([end]);
+
+
+                const total =
+                    allParts.reduce(
+                        (sum, x) =>
+                            sum + x.length,
+                        0
+                    );
+
+
+                const output =
+                    new Uint8Array(
+                        total
+                    );
+
+
+                let position = 0;
+
+
+                for (
+                    const part
+                    of allParts
+                ) {
+
+                    output.set(
+                        part,
+                        position
+                    );
+
+                    position +=
+                        part.length;
+                }
+
+
+                resolve(
+                    new Blob(
+                        [output],
+                        {
+                            type:
+                                "application/zip"
+                        }
+                    )
+                );
+
+
+            } catch (error) {
+
+                reject(error);
+            }
+
+        }
+    );
+}
+
+
+/* =========================================================
+   ZIP Header
+   ========================================================= */
+
+function write16(
+    view,
+    offset,
+    value
+) {
+
+    view.setUint16(
+        offset,
+        value,
+        true
+    );
+}
+
+
+function write32(
+    view,
+    offset,
+    value
+) {
+
+    view.setUint32(
+        offset,
+        value >>> 0,
+        true
+    );
+}
+
+
+function createLocalHeader(
+    name,
+    size,
+    crc
+) {
+
+    const buffer =
+        new ArrayBuffer(
+            30 + name.length
+        );
+
+
+    const view =
+        new DataView(buffer);
+
+
+    write32(
+        view,
+        0,
+        0x04034b50
+    );
+
+
+    write16(
+        view,
+        4,
+        20
+    );
+
+
+    write16(
+        view,
+        6,
+        0x0800
+    );
+
+
+    write16(
+        view,
+        8,
+        0
+    );
+
+
+    write16(
+        view,
+        10,
+        0
+    );
+
+
+    write16(
+        view,
+        12,
+        0
+    );
+
+
+    write32(
+        view,
+        14,
+        crc
+    );
+
+
+    write32(
+        view,
+        18,
+        size
+    );
+
+
+    write32(
+        view,
+        22,
+        size
+    );
+
+
+    write16(
+        view,
+        26,
+        name.length
+    );
+
+
+    write16(
+        view,
+        28,
+        0
+    );
+
+
+    new Uint8Array(
+        buffer,
+        30
+    ).set(name);
+
+
+    return new Uint8Array(
+        buffer
+    );
+}
+
+
+function createCentralHeader(
+    name,
+    size,
+    crc,
+    offset
+) {
+
+    const buffer =
+        new ArrayBuffer(
+            46 + name.length
+        );
+
+
+    const view =
+        new DataView(buffer);
+
+
+    write32(
+        view,
+        0,
+        0x02014b50
+    );
+
+
+    write16(
+        view,
+        4,
+        20
+    );
+
+
+    write16(
+        view,
+        6,
+        20
+    );
+
+
+    write16(
+        view,
+        8,
+        0x0800
+    );
+
+
+    write16(
+        view,
+        10,
+        0
+    );
+
+
+    write16(
+        view,
+        12,
+        0
+    );
+
+
+    write16(
+        view,
+        14,
+        0
+    );
+
+
+    write32(
+        view,
+        16,
+        crc
+    );
+
+
+    write32(
+        view,
+        20,
+        size
+    );
+
+
+    write32(
+        view,
+        24,
+        size
+    );
+
+
+    write16(
+        view,
+        28,
+        name.length
+    );
+
+
+    write16(
+        view,
+        30,
+        0
+    );
+
+
+    write16(
+        view,
+        32,
+        0
+    );
+
+
+    write16(
+        view,
+        34,
+        0
+    );
+
+
+    write16(
+        view,
+        36,
+        0
+    );
+
+
+    write32(
+        view,
+        38,
+        0
+    );
+
+
+    write32(
+        view,
+        42,
+        offset
+    );
+
+
+    new Uint8Array(
+        buffer,
+        46
+    ).set(name);
+
+
+    return new Uint8Array(
+        buffer
+    );
+}
+
+
+function createEndRecord(
+    count,
+    centralSize,
+    offset
+) {
+
+    const buffer =
+        new ArrayBuffer(22);
+
+
+    const view =
+        new DataView(buffer);
+
+
+    write32(
+        view,
+        0,
+        0x06054b50
+    );
+
+
+    write16(
+        view,
+        4,
+        0
+    );
+
+
+    write16(
+        view,
+        6,
+        0
+    );
+
+
+    write16(
+        view,
+        8,
+        count
+    );
+
+
+    write16(
+        view,
+        10,
+        count
+    );
+
+
+    write32(
+        view,
+        12,
+        centralSize
+    );
+
+
+    write32(
+        view,
+        16,
+        offset
+    );
+
+
+    write16(
+        view,
+        20,
+        0
+    );
+
+
+    return new Uint8Array(
+        buffer
+    );
+}
+
+
+/* =========================================================
+   CRC32
+   ========================================================= */
+
+let crcTable = null;
+
+
+function makeCrcTable() {
+
+    const table =
+        new Uint32Array(256);
+
+
+    for (
+        let n = 0;
+        n < 256;
+        n++
+    ) {
+
+        let c = n;
+
+
+        for (
+            let k = 0;
+            k < 8;
+            k++
+        ) {
+
+            c =
+                (c & 1)
+                ? 0xEDB88320 ^
+                  (c >>> 1)
+                : c >>> 1;
+        }
+
+
+        table[n] =
+            c >>> 0;
+    }
+
+
+    return table;
+}
+
+
+function crc32(bytes) {
+
+    if (!crcTable) {
+
+        crcTable =
+            makeCrcTable();
+    }
+
+
+    let crc =
+        0xFFFFFFFF;
+
+
+    for (
+        let i = 0;
+        i < bytes.length;
+        i++
+    ) {
+
+        crc =
+            crcTable[
+                (crc ^ bytes[i]) & 0xFF
+            ] ^
+            (crc >>> 8);
+    }
+
+
+    return (
+        crc ^ 0xFFFFFFFF
+    ) >>> 0;
+}
+
+
+/* =========================================================
+   下载
+   ========================================================= */
+
+function downloadBlob(
+    blob,
+    filename
+) {
+
+    const url =
+        URL.createObjectURL(
+            blob
+        );
+
+
+    const a =
+        document.createElement(
+            "a"
+        );
+
+
+    a.href =
+        url;
+
+    a.download =
+        filename;
+
+    document.body.appendChild(a);
+
+    a.click();
+
+    a.remove();
+
+
+    setTimeout(
+        () => URL.revokeObjectURL(url),
+        3000
+    );
+}
+
+
+function createZipFilename() {
+
+    const now =
+        new Date();
+
+
+    const y =
+        now.getFullYear();
+
+
+    const m =
+        String(
+            now.getMonth() + 1
+        ).padStart(2,"0");
+
+
+    const d =
+        String(
+            now.getDate()
+        ).padStart(2,"0");
+
+
+    const h =
+        String(
+            now.getHours()
+        ).padStart(2,"0");
+
+
+    const min =
+        String(
+            now.getMinutes()
+        ).padStart(2,"0");
+
+
+    const s =
+        String(
+            now.getSeconds()
+        ).padStart(2,"0");
+
+
+    return (
+        "Unicode_HTML_Test_" +
+        y + m + d +
+        "_" +
+        h + min + s +
+        ".zip"
+    );
+}
+
+
+/* =========================================================
+   日志
+   ========================================================= */
+
+function writeLog(
+    result,
+    output,
+    elapsed
+) {
+
+    const log =
+        document.getElementById(
+            "log"
+        );
+
+
+    const lines = [];
+
+
+    lines.push(
+        "========================================"
+    );
+
+
+    lines.push(
+        "Unicode HTML 鲁棒性测试"
+    );
+
+
+    lines.push(
+        "========================================"
+    );
+
+
+    lines.push(
+        "生成时间：" +
+        new Date().toLocaleString()
+    );
+
+
+    lines.push(
+        "本次生成耗时：" +
+        elapsed.toFixed(3) +
+        " ms"
+    );
+
+
+    lines.push(
+        "HTML 字符长度：" +
+        output.length
+    );
+
+
+    lines.push(
+        "HTML UTF-8 大小：" +
+        formatBytes(
+            new Blob([
+                output
+            ]).size
+        )
+    );
+
+
+    lines.push(
+        "本次实际使用字符：" +
+        result.usedCodes.length
+    );
+
+
+    lines.push("");
+
+
+    if (
+        result.usedCodes.length === 0
+    ) {
+
+        lines.push(
+            "本次没有插入 Unicode 测试字符。"
+        );
+
+    } else {
+
+        lines.push(
+            "本次使用的 Unicode："
+        );
+
+
+        result.usedCodes.forEach(
+            code => {
+
+                lines.push(
+                    "  " + code
+                );
+            }
+        );
+    }
+
+
+    lines.push("");
+
+
+    lines.push(
+        "说明：本工具用于 Unicode / HTML / DOM " +
+        "渲染鲁棒性测试。"
+    );
+
+
+    log.textContent =
+        lines.join("\n");
+}
+
+
+function writeLogError(error) {
+
+    document.getElementById(
+        "log"
+    ).textContent =
+        "执行错误：\n\n" +
+        error.message +
+        "\n\n" +
+        error.stack;
+}
+
+
+/* =========================================================
+   配置
+   ========================================================= */
+
+const CONFIG_KEY =
+    "unicode_html_robustness_config_v2";
+
+
+/* =========================================================
+   配置管理 (全量无错重构版)
+   ========================================================= */
+
+
+
+function saveConfig(
+    showMessage = true
+) {
+
+    const config = {
+
+        enabledCodes:
+            Array.from(
+                enabledCodes
+            ),
+
+        noiseProbability:
+            document.getElementById(
+                "noiseProbability"
+            ).value,
+
+        maxRepeat:
+            document.getElementById(
+                "maxRepeat"
+            ).value,
+
+        maxWidth:
+            document.getElementById(
+                "maxWidth"
+            ).value,
+
+
+        enableNoise:
+            document.getElementById(
+                "enableNoise"
+            ).checked,
+
+        exportCount:
+            document.getElementById(
+                "exportCount"
+            ).value,
+
+        enableHomoglyph: document.getElementById("enableHomoglyph").checked,
+        enableSmuggling: document.getElementById("enableSmuggling").checked,
+        enableZeroFont: document.getElementById("enableZeroFont").checked,
+        enablePixelGrid: document.getElementById("enablePixelGrid").checked
+    };
+
+
+    localStorage.setItem(
+        CONFIG_KEY,
+        JSON.stringify(config)
+    );
+
+
+    if (showMessage) {
+
+        writeSimpleLog(
+            "配置已保存。\n" +
+            "启用字符：" +
+            enabledCodes.size
+        );
+    }
+}
+
+
+function loadConfig() {
+
+    try {
+
+        const raw =
+            localStorage.getItem(
+                CONFIG_KEY
+            );
+
+
+        if (!raw) {
+
+            return;
+        }
+
+
+        const config =
+            JSON.parse(raw);
+
+
+        if (
+            Array.isArray(
+                config.enabledCodes
+            )
+        ) {
+
+            enabledCodes =
+                new Set(
+                    config.enabledCodes.filter(
+                        code =>
+                            DEFAULT_CODES.includes(
+                                code
+                            )
+                    )
+                );
+        }
+
+
+        if (
+            config.noiseProbability !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "noiseProbability"
+            ).value =
+                config.noiseProbability;
+        }
+
+
+        if (
+            config.maxRepeat !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "maxRepeat"
+            ).value =
+                config.maxRepeat;
+        }
+
+
+        if (
+            config.maxWidth !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "maxWidth"
+            ).value =
+                config.maxWidth;
+        }
+
+
+
+
+        if (
+            config.enableNoise !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "enableNoise"
+            ).checked =
+                config.enableNoise;
+        }
+
+
+        if (
+            config.exportCount !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "exportCount"
+            ).value =
+                config.exportCount;
+        }
+
+        if (config.enableHomoglyph !== undefined) document.getElementById("enableHomoglyph").checked = config.enableHomoglyph;
+        if (config.enableSmuggling !== undefined) document.getElementById("enableSmuggling").checked = config.enableSmuggling;
+        if (config.enableZeroFont !== undefined) document.getElementById("enableZeroFont").checked = config.enableZeroFont;
+        if (config.enablePixelGrid !== undefined) document.getElementById("enablePixelGrid").checked = config.enablePixelGrid;
+
+        renderCharList();
+
+
+    } catch (error) {
+
+        console.error(
+            "配置读取失败：",
+            error
+        );
+    }
+}
+
+
+function resetConfig() {
+
+    enabledCodes =
+        new Set(DEFAULT_CODES);
+
+
+    document.getElementById(
+        "noiseProbability"
+    ).value =
+        35;
+
+
+    document.getElementById(
+        "maxRepeat"
+    ).value =
+        2;
+
+
+    document.getElementById(
+        "maxWidth"
+    ).value =
+        "500-560";
+
+
+
+
+    document.getElementById(
+        "exportCount"
+    ).value =
+        10;
+
+
+    document.getElementById(
+        "enableNoise"
+    ).checked =
+        true;
+
+    document.getElementById("enableHomoglyph").checked = true;
+    document.getElementById("enableSmuggling").checked = true;
+    document.getElementById("enableZeroFont").checked = true;
+    document.getElementById("enablePixelGrid").checked = true;
+
+    renderCharList();
+
+    saveConfig(false);
+
+
+    writeSimpleLog(
+        "已恢复默认配置。"
+    );
+}
+
+
+
+function writeSimpleLog(text) {
+
+    document.getElementById(
+        "log"
+    ).textContent =
+        "[" +
+        new Date().toLocaleTimeString() +
+        "] " +
+        text;
+}
+
+
+/* =========================================================
+   初始化
+   ========================================================= */
+
+document.addEventListener(
+    "DOMContentLoaded",
+    () => {
+
+        renderCharList();
+
+        loadConfig();
+
+    }
+);
+
+
+
+</script>
+
+</body>
+</html>
