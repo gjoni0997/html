@@ -1,0 +1,5222 @@
+<!DOCTYPE html>
+<!--
+  修复版（相对上一版）主要变更：
+  1. 定义 LATIN_HOMOGLYPH_TABLE：原文件引用未定义变量，脚本在加载阶段即抛
+     ReferenceError，导致字符池、生成、导出全部失效。
+  2. 按钮文字改为“先插 Unicode 字符、后做 HTML 转义”，避免零宽字符把
+     &amp; / &quot; 等实体从中间拆开而在页面上显示成乱码。
+  3. contentlist.txt 每条记录末尾补换行，修复下一条 “True” 直接粘在
+     CONTENTLINE 分隔线后的格式错误。
+  4. 批量上限强制夹到 50000，超 20000 条先确认；单条字节统计不再创建 Blob。
+  5. 修正种子 RNG 的 32 位截断、数字保护的 O(n²) 扫描等性能/正确性问题。
+  6. “恢复默认”与 HTML 初始值对齐；配置保存/读取包含随机种子；
+     移除未使用的 ZIP 写入与未调用的贝叶斯生成器。
+  7. 集成 HTML 结构噪点伪装模块：贝叶斯文本可重织为随机 DOM 碎片，
+     使用独立开关控制，并保留关闭后的原隐藏容器行为。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Unicode HTML 实时渲染与批量导出测试工具</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 20px;
+    background: #f4f6f9;
+    color: #333;
+    font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        "Microsoft YaHei",
+        sans-serif;
+}
+
+.container {
+    max-width: 1500px;
+    margin: 0 auto;
+    background: #fff;
+    padding: 24px;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,.08);
+}
+
+h2 {
+    margin: 0 0 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #eaedf3;
+    font-size: 22px;
+}
+
+h3 {
+    margin: 0 0 12px;
+    font-size: 16px;
+}
+
+.row {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 15px;
+}
+
+.col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+label {
+    margin-bottom: 7px;
+    font-weight: bold;
+    font-size: 14px;
+    color: #444;
+}
+
+input[type="text"],
+input[type="number"],
+textarea,
+select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccd4e0;
+    border-radius: 6px;
+    font-size: 14px;
+    background: #fff;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+    border-color: #236cda;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(35,108,218,.1);
+}
+
+textarea {
+    font-family: Consolas, "Courier New", monospace;
+    resize: vertical;
+}
+
+.input-area {
+    height: 140px;
+}
+
+.button-text-area {
+    height: 96px;
+    min-height: 72px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+.field-hint {
+    display: block;
+    margin-top: 6px;
+    color: #737b89;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+button {
+    border: 0;
+    border-radius: 6px;
+    padding: 10px 18px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 14px;
+    background: #236cda;
+    color: white;
+}
+
+button:hover {
+    background: #1f5bbe;
+}
+
+button:active {
+    transform: scale(.98);
+}
+
+button.secondary {
+    background: #687385;
+}
+
+button.secondary:hover {
+    background: #566172;
+}
+
+button.danger {
+    background: #c0392b;
+}
+
+button.danger:hover {
+    background: #a93226;
+}
+
+button.green {
+    background: #198754;
+}
+
+button.green:hover {
+    background: #157347;
+}
+
+button.orange {
+    background: #e67e22;
+}
+
+button.orange:hover {
+    background: #ca6f1e;
+}
+
+button:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+}
+
+.btn-container {
+    text-align: center;
+    margin: 20px 0;
+}
+
+.main-button {
+    padding: 14px 50px;
+    font-size: 16px;
+}
+
+.export-box {
+    margin-top: 10px;
+    padding: 16px;
+    background: #f8fafc;
+    border: 1px solid #dfe5ec;
+    border-radius: 8px;
+}
+
+.export-row {
+    display: flex;
+    align-items: end;
+    gap: 12px;
+}
+
+.export-number {
+    width: 180px !important;
+}
+
+.export-button {
+    padding: 11px 25px;
+}
+
+.progress-wrap {
+    margin-top: 12px;
+    display: none;
+}
+
+.progress-bg {
+    width: 100%;
+    height: 12px;
+    border-radius: 20px;
+    background: #e5e9ef;
+    overflow: hidden;
+}
+
+.progress-bar {
+    width: 0%;
+    height: 100%;
+    background: #236cda;
+    transition: width .1s;
+}
+
+.progress-text {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #687385;
+}
+
+.panel-container {
+    display: flex;
+    gap: 20px;
+    margin-top: 15px;
+    min-height: 560px;
+}
+
+.panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.code-output {
+    width: 100%;
+    height: 560px;
+    background: #fafafa;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    border: 1px solid #ccd4e0;
+    border-radius: 6px;
+    padding: 12px;
+    resize: none;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.preview-box {
+    width: 100%;
+    height: 560px;
+    border: 1px solid #ccd4e0;
+    border-radius: 6px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.preview-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+.control-box {
+    background: #f8fafc;
+    border: 1px solid #e0e5ec;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+.control-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+
+.stats {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.stat {
+    background: white;
+    border: 1px solid #e0e5ec;
+    border-radius: 7px;
+    padding: 10px;
+}
+
+.stat-title {
+    color: #687385;
+    font-size: 12px;
+}
+
+.stat-value {
+    font-size: 18px;
+    font-weight: bold;
+    margin-top: 3px;
+}
+
+.char-toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.char-list {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 8px;
+    background: white;
+    border: 1px solid #dfe4eb;
+    border-radius: 6px;
+}
+
+.char-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px;
+    border: 1px solid #e1e5eb;
+    border-radius: 5px;
+    font-size: 11px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.char-item:hover {
+    background: #f3f6fa;
+}
+
+.char-code {
+    font-family: Consolas, monospace;
+    font-weight: bold;
+}
+
+.char-preview {
+    min-width: 16px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed #bbb;
+    font-family: monospace;
+}
+
+.log {
+    width: 100%;
+    height: 220px;
+    background: #10141a;
+    color: #dce5ef;
+    border-radius: 7px;
+    padding: 12px;
+    font-family: Consolas, monospace;
+    font-size: 12px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+}
+
+.help {
+    color: #687385;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.warning {
+    margin-top: 10px;
+    padding: 9px 12px;
+    border-radius: 6px;
+    background: #fff8e6;
+    border: 1px solid #f0d98a;
+    color: #765b00;
+    font-size: 12px;
+}
+
+/* =====================================================
+   对抗混淆控件（① – ④ 功能开关）
+   ===================================================== */
+
+.switch-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed #e0e5ec;
+}
+
+.switch-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0;
+    padding: 8px 10px;
+    border: 1px solid #dfe5ec;
+    border-radius: 6px;
+    background: #fff;
+    font-weight: normal;
+    font-size: 13px;
+    color: #414a57;
+    cursor: pointer;
+    user-select: none;
+}
+
+.switch-item:hover {
+    border-color: #b9c6d6;
+    background: #f7fafd;
+}
+
+.switch-item input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+    accent-color: #236cda;
+}
+
+input[type="range"] {
+    width: 100%;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    accent-color: #236cda;
+    cursor: pointer;
+}
+
+input[type="range"]:focus {
+    box-shadow: none;
+}
+
+.range-value {
+    font-weight: bold;
+    color: #236cda;
+}
+
+@media (max-width: 1000px) {
+
+    .row,
+    .panel-container {
+        flex-direction: column;
+    }
+
+    .control-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .switch-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .char-list {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .export-row {
+        flex-wrap: wrap;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>Unicode HTML 实时渲染与批量导出测试工具</h2>
+
+
+<!-- =====================================================
+     ① 测试内容
+     ===================================================== -->
+
+<div class="control-box">
+
+    <h3>① 测试内容</h3>
+
+    <div class="row">
+
+        <div class="col">
+
+            <label for="beforeContent">
+                前置测试内容
+            </label>
+
+            <textarea
+                id="beforeContent"
+                class="input-area"
+                placeholder="输入需要进行 Unicode / HTML 鲁棒性测试的前置内容..."></textarea>
+
+        </div>
+
+    </div>
+
+
+    <div class="row">
+
+        <div class="col">
+
+            <label for="targetUrl">
+                测试链接 URL
+            </label>
+
+            <input
+                id="targetUrl"
+                type="text"
+                value="%{AUTOVALS1}">
+
+        </div>
+
+
+        <div class="col">
+
+            <label for="buttonText">
+                按钮显示文字
+            </label>
+
+            <textarea
+                id="buttonText"
+                class="input-area button-text-area"
+                rows="3"
+                placeholder="每行输入一段按钮文字，生成后会按换行显示；支持空行。&#10;例如：&#10;ご利用明細を確認&#10;こちらをクリックしてください"></textarea>
+            <small class="field-hint">支持多行文字；输入几行，按钮中就按相同顺序分行显示。留空时使用默认文字。</small>
+
+        </div>
+
+    </div>
+
+
+    <div class="row">
+
+        <div class="col">
+
+            <label for="afterContent">
+                后置测试内容
+            </label>
+
+            <textarea
+                id="afterContent"
+                class="input-area"
+                placeholder="输入需要进行 Unicode / HTML 鲁棒性测试的后置内容..."></textarea>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     ④ 单次实时生成
+     ===================================================== -->
+
+<div class="btn-container">
+
+    <button
+        class="main-button"
+        onclick="synthesizeTemplate()">
+
+        一键实时合成（每次点击重新生成）
+
+    </button>
+
+</div>
+
+
+<!-- =====================================================
+     ⑤ 批量导出
+     ===================================================== -->
+
+<div class="export-box">
+
+    <h3>⑤ 批量生成并导出 HTML</h3>
+
+
+    <div class="export-row">
+
+        <div>
+
+            <label for="exportCount">
+                生成数量
+            </label>
+
+            <input
+                id="exportCount"
+                class="export-number"
+                type="number"
+                min="1"
+                max="50000"
+                value="10000">
+
+        </div>
+
+
+        <button
+            id="exportButton"
+            class="orange export-button"
+            onclick="batchGenerateAndExport()">
+
+            一键生成并导出 HTML
+
+        </button>
+
+    </div>
+
+
+    <div class="help" style="margin-top:8px">
+
+        按照 contentlist.txt 的格式，将所有随机生成的 HTML
+        按顺序连续写入同一个 contentlist.txt 文档。
+
+    </div>
+
+
+    <div class="warning">
+
+        建议单次生成数量不要过大。
+        大量 HTML 会暂时占用浏览器内存。
+
+    </div>
+
+
+    <div
+        id="progressWrap"
+        class="progress-wrap">
+
+        <div class="progress-bg">
+
+            <div
+                id="progressBar"
+                class="progress-bar">
+            </div>
+
+        </div>
+
+
+        <div
+            id="progressText"
+            class="progress-text">
+
+            准备中...
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     ⑥ 统计
+     ===================================================== -->
+
+<div class="stats">
+
+    <div class="stat">
+
+        <div class="stat-title">
+            使用字符种类
+        </div>
+
+        <div
+            class="stat-value"
+            id="statChars">
+            0
+        </div>
+
+    </div>
+
+
+    <div class="stat">
+
+        <div class="stat-title">
+            输出长度
+        </div>
+
+        <div
+            class="stat-value"
+            id="statLength">
+            0
+        </div>
+
+    </div>
+
+
+    <div class="stat">
+
+        <div class="stat-title">
+            HTML 大小
+        </div>
+
+        <div
+            class="stat-value"
+            id="statBytes">
+            0 B
+        </div>
+
+    </div>
+
+
+    <div class="stat">
+
+        <div class="stat-title">
+            生成耗时
+        </div>
+
+        <div
+            class="stat-value"
+            id="statTime">
+            0 ms
+        </div>
+
+    </div>
+
+
+    <div class="stat">
+
+        <div class="stat-title">
+            性能测试
+        </div>
+
+        <div
+            class="stat-value"
+            id="statBenchmark">
+            --
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     ⑦ 双栏
+     ===================================================== -->
+
+<div class="panel-container">
+
+    <div class="panel">
+
+        <label>
+            [左栏] 本次生成 HTML 源码
+        </label>
+
+
+        <textarea
+            id="codeOutput"
+            class="code-output"
+            readonly
+            placeholder="点击上方按钮生成测试变体..."></textarea>
+
+    </div>
+
+
+    <div class="panel">
+
+        <label>
+            [右栏] 实时渲染效果
+        </label>
+
+
+        <div class="preview-box">
+
+            <iframe
+                id="previewIframe"
+                class="preview-iframe"
+                title="实时渲染预览"
+                sandbox="">
+            </iframe>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     ⑧ 日志
+     ===================================================== -->
+
+<div
+    class="control-box"
+    style="margin-top:20px">
+
+    <h3>
+        ⑧ 测试日志
+    </h3>
+
+
+    <div
+        id="log"
+        class="log"
+        role="log"
+        aria-live="polite">
+    </div>
+
+</div>
+
+
+
+
+<!-- =====================================================
+     ② Unicode 字符池
+     ===================================================== -->
+
+<div class="control-box">
+
+    <h3>② Unicode 测试字符池</h3>
+
+
+    <div class="char-toolbar">
+
+        <button onclick="selectAllChars()">
+            全部启用
+        </button>
+
+        <button
+            class="secondary"
+            onclick="unselectAllChars()">
+            全部关闭
+        </button>
+
+        <button
+            class="secondary"
+            onclick="selectRandomChars()">
+            随机选择
+        </button>
+
+        <button
+            class="green"
+            onclick="saveConfig()">
+            保存配置
+        </button>
+
+        <button
+            class="secondary"
+            onclick="loadConfig()">
+            读取配置
+        </button>
+
+        <button
+            class="danger"
+            onclick="resetConfig()">
+            恢复默认
+        </button>
+
+    </div>
+
+
+    <div id="charList" class="char-list"></div>
+
+
+    <div class="help">
+
+        当前字符池按照你提供的列表建立。
+
+        已排除 U+202A–U+202E 与 U+2066–U+2069。
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     ③ 参数
+     ===================================================== -->
+
+<div class="control-box">
+
+    <h3>③ 测试参数</h3>
+
+
+    <div class="control-grid">
+
+        <div>
+
+            <label>
+                字符插入概率 (%)
+            </label>
+
+            <input
+                id="noiseProbability"
+                type="number"
+                min="0"
+                max="100"
+                value="15">
+
+        </div>
+
+
+        <div>
+
+            <label>
+                每个位置最大重复次数
+            </label>
+
+            <input
+                id="maxRepeat"
+                type="number"
+                min="1"
+                max="3"
+                value="2">
+
+        </div>
+
+        <div>
+            <label for="randomSeed">随机种子（可选）</label>
+            <input id="randomSeed" type="text" value="" placeholder="留空则每次随机；填写后可复现结果">
+            <small class="field-hint">相同种子与参数可复现结构与字符样本；时间 / 链接指纹仍会随时间变化。</small>
+        </div>
+
+
+        <div>
+
+            <label for="maxWidth">
+                HTML 最大宽度
+            </label>
+
+            <input
+                id="maxWidth"
+                type="text"
+                inputmode="numeric"
+                value="500-660"
+                placeholder="例如 500-660 或 560"
+                aria-describedby="maxWidthHelp">
+
+            <small id="maxWidthHelp" class="field-hint">可填写固定宽度（如 560）或随机范围（如 500-660），单位 px。</small>
+
+        </div>
+
+
+        <div>
+
+            <label for="headMetaDensity">文档头 Meta 数量</label>
+            <select id="headMetaDensity">
+                <option value="light">精简</option>
+                <option value="normal" selected>标准</option>
+                <option value="rich">丰富</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label for="headCssMode">文档头 CSS 风格</label>
+            <select id="headCssMode">
+                <option value="random" selected>随机风格</option>
+                <option value="minimal">简洁</option>
+                <option value="button">按钮辅助样式</option>
+                <option value="text">文字排版</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label for="confusionProbability">
+                混淆发生概率 (%)
+            </label>
+
+            <input
+                id="confusionProbability"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value="20"
+                aria-describedby="confusionProbabilityHelp">
+
+            <small id="confusionProbabilityHelp" class="field-hint">
+                当前 <span id="confusionProbabilityValue" class="range-value">20</span>%：
+                控制日本敏感词 / 同形异义字的替换发生率（每个可替换字符独立抽取）。
+                ZeroFont 的穿插率由下方独立旋钮控制。
+            </small>
+
+        </div>
+
+        <div>
+
+            <label for="bayesianDensity">
+                贝叶斯毒化语料密度（句/条）
+            </label>
+
+            <input
+                id="bayesianDensity"
+                type="text"
+                value="5"
+                placeholder="例如 5 或 3-12"
+                aria-describedby="bayesianDensityHelp">
+
+            <small id="bayesianDensityHelp" class="field-hint">
+                每封邮件抽取并隐蔽拼接的白词长句总数。支持固定值（如 5）或随机范围（如 3-12）。
+            </small>
+
+        </div>
+
+        <div>
+
+            <label for="zeroFontProbability">
+                ZeroFont 伪装词穿插概率 (%)
+            </label>
+
+            <input
+                id="zeroFontProbability"
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                value="20"
+                aria-describedby="zeroFontProbabilityHelp">
+
+            <small id="zeroFontProbabilityHelp" class="field-hint">
+                仅作用于 ZeroFont 伪装词的穿插率；该概率大于 0 时，
+                原零宽字符密度会固定下调至 55%，避免两类不可见特征叠加。
+            </small>
+
+        </div>
+
+        <div>
+
+            <label for="linkMutationMode">链接指纹注入方式</label>
+            <select id="linkMutationMode">
+                <option value="smart" selected>智能（占位符用 # 片段，可打开且唯一）</option>
+                <option value="detach">分离式（绝不改 href，指纹写入 data-*）</option>
+                <option value="query">查询参数 (?s=，占位符自动降级为 #)</option>
+                <option value="hash">锚点哈希 (#s=)</option>
+            </select>
+            <small class="field-hint">
+                片段（# 之后）不会发送到服务器，所以 %{AUTOVALS1} 展开后的链接仍能正常打开，同时每条 href 因指纹而唯一。若平台连 # 也不允许，请选「分离式」。
+            </small>
+
+        </div>
+
+    </div>
+
+
+    <!-- -----------------------------------------------
+         对抗混淆四大功能开关（与实时合成、批量导出联动）
+         ----------------------------------------------- -->
+
+    <!-- -----------------------------------------------
+         9 维对抗开关：响应式网格（大屏 4 列 / 小屏 2 列）
+         ----------------------------------------------- -->
+
+    <div class="switch-grid">
+
+        <label class="switch-item" for="enableNoise">
+            <input
+                type="checkbox"
+                id="enableNoise"
+                checked>
+            启用 Unicode 字符测试
+        </label>
+
+        <label class="switch-item" for="enableAsciiSmuggle">
+            <input
+                type="checkbox"
+                id="enableAsciiSmuggle"
+                checked>
+            启用 ASCII 走私隐写 (ASCII Smuggling)
+        </label>
+
+        <label class="switch-item" for="enableZeroFont">
+            <input
+                type="checkbox"
+                id="enableZeroFont"
+                checked>
+            启用动态 ZeroFont 穿插 (Zero-Font Splitting)
+        </label>
+
+        <label class="switch-item" for="enableTableGrid">
+            <input
+                type="checkbox"
+                id="enableTableGrid"
+                checked>
+            启用多层网格表格降级 (Table Skeleton)
+        </label>
+
+        <label class="switch-item" for="enableHomoglyph">
+            <input
+                type="checkbox"
+                id="enableHomoglyph"
+                checked>
+            启用日本敏感词异义替换 (Homoglyph Attack)
+        </label>
+
+        <label class="switch-item" for="enableBayesian">
+            <input
+                type="checkbox"
+                id="enableBayesian"
+                checked>
+            启用贝叶斯语义毒化干扰 (Bayesian Poisoning)
+        </label>
+
+        <label
+            class="switch-item"
+            for="enableBayesianHtmlNoise"
+            title="仅在启用贝叶斯语义毒化时生效；关闭后回退为单一隐藏容器。">
+            <input
+                type="checkbox"
+                id="enableBayesianHtmlNoise"
+                checked>
+            启用贝叶斯文本 HTML 结构噪点伪装
+        </label>
+
+        <label class="switch-item" for="enableDomShuffle">
+            <input
+                type="checkbox"
+                id="enableDomShuffle"
+                checked>
+            启用多态 DOM 树指纹扰乱 (DOM Shuffling)
+        </label>
+
+        <label class="switch-item" for="enableLinkMutation">
+            <input
+                type="checkbox"
+                id="enableLinkMutation"
+                checked>
+            启用时效性动态指纹链接 (Time-Fused Mutation)
+        </label>
+
+    </div>
+
+</div>
+
+
+
+
+</div>
+
+
+<script>
+
+/* =========================================================
+   Unicode 字符池
+   ========================================================= */
+
+const DEFAULT_CODES = [
+
+    "U+200C",
+    "U+200D",
+    "U+200B",
+    "U+FEFF",
+    "U+2060",
+    "U+200F"
+];
+
+
+/* =========================================================
+   状态
+   ========================================================= */
+
+let enabledCodes =
+    new Set(DEFAULT_CODES);
+
+
+/* =========================================================
+   基础工具
+   ========================================================= */
+
+// 可复现的测试随机源：种子为空时使用浏览器默认随机源。
+let seededRandomState = null;
+function setRandomSeed(seed) {
+    const value = String(seed ?? '').trim();
+    if (!value) { seededRandomState = null; return; }
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i++) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    seededRandomState = hash >>> 0 || 1;
+}
+function randomFloat() {
+    if (seededRandomState === null) return Math.random();
+    // Mulberry32：用于可复现的测试数据，不用于密码学用途。
+    // 必须每步 >>> 0 截断到 32 位：批量生成会消耗数以百万计的随机数，
+    // 若让内部状态无限增长，超过 2^53 后会丢失低位、随机序列退化。
+    let t = (seededRandomState = (seededRandomState + 0x6D2B79F5) >>> 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+function pick(arr) {
+    return arr[Math.floor(randomFloat() * arr.length)];
+}
+
+
+function rand(min, max) {
+
+    return Math.floor(
+        randomFloat() *
+        (max - min + 1)
+    ) + min;
+}
+
+
+function codeToChar(code) {
+
+    const hex =
+        code.replace(/^U\+/i, "");
+
+    const cp =
+        parseInt(hex, 16);
+
+    if (!Number.isFinite(cp)) {
+        return "";
+    }
+
+    try {
+
+        return String.fromCodePoint(cp);
+
+    } catch {
+
+        return "";
+    }
+}
+
+
+function escapeHtml(text) {
+
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+
+function formatBytes(bytes) {
+
+    if (bytes < 1024) {
+
+        return bytes + " B";
+    }
+
+    if (bytes < 1024 * 1024) {
+
+        return (
+            bytes / 1024
+        ).toFixed(2) + " KB";
+    }
+
+    return (
+        bytes / 1024 / 1024
+    ).toFixed(2) + " MB";
+}
+
+
+// 组合附加符号（重音、浊点、变体选择符等）、零宽连接符与肤色修饰符。
+// 在这些字符前插入不可见字符会把一个用户可见字形拆散，必须避开。
+const COMBINING_MARK_PATTERN = /[\p{M}\u200D]/u;
+
+// 热路径上反复使用的正则：提升到模块级，避免每个字符都新建 RegExp。
+const WHITESPACE_TEST = /\s/u;
+const NUMBER_TEST = /\p{N}/u;
+const NUMERIC_TOKEN_PATTERN = /[0-9０-９]+(?:[,.，．٫٬:：/／\-－–—][0-9０-９]+)*(?:\s*(?:円|万円|％|%|‰|‱|件|個|回|人|日|年|月|時|分|秒|km|kg|MB|GB))?/giu;
+
+function isCombiningChar(char) {
+
+    if (!char) {
+        return false;
+    }
+
+    const codePoint = char.codePointAt(0);
+
+    return COMBINING_MARK_PATTERN.test(char) ||
+        (codePoint >= 0x1F3FB && codePoint <= 0x1F3FF);
+}
+
+
+// 计算 UTF-8 字节数，不分配中间数组。批量导出时每条记录都会调用，
+// 比 new Blob([text]).size 或 TextEncoder.encode 更省内存。
+function utf8ByteLength(text) {
+
+    const value = String(text);
+
+    let bytes = 0;
+
+    for (let i = 0; i < value.length; i++) {
+
+        const code = value.charCodeAt(i);
+
+        if (code < 0x80) {
+            bytes += 1;
+        } else if (code < 0x800) {
+            bytes += 2;
+        } else if (code >= 0xD800 && code <= 0xDBFF) {
+            // 代理对：4 字节，并跳过随后的低代理。
+            bytes += 4;
+            i++;
+        } else {
+            bytes += 3;
+        }
+    }
+
+    return bytes;
+}
+
+
+/* =========================================================
+   对抗混淆模块（红队工程化增强）
+   ---------------------------------------------------------
+   ① ASCII 走私：影子指纹 → Unicode Tag 区块（0xE0000 偏移）
+   ② 动态 ZeroFont：零字体伪装词混合拆分
+   ③ 多层网格降级：邮件客户端安全的 table 按钮骨架
+   ④ 日本敏感词同形异义字替换
+
+   四大模块全部只在对应开关打开时介入；原有 Unicode 字符池、
+   插入概率、批量导出 contentlist.txt 格式一行未改。
+   ========================================================= */
+
+// Unicode Tag 区块起始码位；隐写时统一使用 BASE + ASCII 码位。
+const ANTI_TAG_BASE_OFFSET = 0xE0000;
+
+// 每封邮件共享同一串影子指纹，跨邮件重新生成。
+let generationShadowPayload = null;
+
+// 影子数据在一封邮件内按片段分配，不会整串重复出现。
+let generationSmuggleCursor = 0;
+
+// 影子指纹的码位数组缓存：每封邮件只编码一次，
+// 避免每次 takeSmuggleSlice 都重新遍历整串并生成代理对。
+let generationSmuggleChars = null;
+
+
+function isAntiEnabled(elementId) {
+
+    const element =
+        document.getElementById(elementId);
+
+    return !!(element && element.checked);
+}
+
+
+function getConfusionProbability() {
+
+    const element =
+        document.getElementById("confusionProbability");
+
+    const value =
+        Number(element && element.value);
+
+    if (!Number.isFinite(value)) {
+        return 0.2;
+    }
+
+    return Math.max(0, Math.min(100, value)) / 100;
+}
+
+
+function updateConfusionProbabilityLabel() {
+
+    const element =
+        document.getElementById("confusionProbability");
+
+    const label =
+        document.getElementById("confusionProbabilityValue");
+
+    if (!element || !label) {
+        return;
+    }
+
+    label.textContent =
+        String(element.value);
+}
+
+
+function describeAntiStatus() {
+
+    const parts = [];
+
+    if (isAntiEnabled("enableNoise")) {
+        parts.push("Unicode字符");
+    }
+
+    if (isAntiEnabled("enableAsciiSmuggle")) {
+        parts.push("ASCII走私");
+    }
+
+    if (isAntiEnabled("enableZeroFont")) {
+        parts.push("ZeroFont");
+    }
+
+    if (isAntiEnabled("enableTableGrid")) {
+        parts.push("网格降级");
+    }
+
+    if (isAntiEnabled("enableHomoglyph")) {
+        parts.push("异义替换");
+    }
+
+    if (isAntiEnabled("enableBayesian")) {
+        parts.push("贝叶斯毒化");
+
+        if (isAntiEnabled("enableBayesianHtmlNoise")) {
+            parts.push("HTML噪点");
+        }
+    }
+
+    if (isAntiEnabled("enableDomShuffle")) {
+        parts.push("DOM扰乱");
+    }
+
+    if (isAntiEnabled("enableLinkMutation")) {
+        parts.push("时效链接");
+    }
+
+    return parts.length
+        ? parts.join(" + ")
+        : "全部关闭";
+}
+
+
+function describeLinkMutationMode() {
+    const mode = getLinkMutationMode();
+    return {
+        smart: "智能（占位符用 # 片段）",
+        detach: "分离式（不改 href，指纹写入 data-*）",
+        query: "查询参数 (?s=)",
+        hash: "锚点哈希 (#s=)"
+    }[mode] || mode;
+}
+
+
+/* ---------------------------------------------------------
+   ④ 日本敏感词与同形异义字替换
+   ---------------------------------------------------------
+   仅保留日本高频拦截假名与英文字母的异义字库；
+   不再包含任何中文敏感词映射。
+
+   注意：三张表按“并集”合并，同一字符可以同时拥有西里尔、
+   希腊、全角、汉字等多种同形变体；合并时自动去掉与原文
+   相同的字符，避免“替换成自己”。
+   --------------------------------------------------------- */
+
+// 拉丁字母 → 西里尔 / 希腊 / 全角 同形字
+const LATIN_HOMOGLYPH_TABLE = {
+    "A": ["А", "Α", "Ａ"],
+    "B": ["В", "Β", "Ｂ"],
+    "C": ["С", "Ϲ", "Ｃ"],
+    "E": ["Е", "Ε", "Ｅ"],
+    "H": ["Н", "Η", "Ｈ"],
+    "I": ["І", "Ι", "Ｉ"],
+    "J": ["Ј", "Ｊ"],
+    "K": ["К", "Κ", "Ｋ"],
+    "M": ["М", "Μ", "Ｍ"],
+    "O": ["О", "Ο", "Ｏ"],
+    "P": ["Р", "Ρ", "Ｐ"],
+    "S": ["Ѕ", "Ｓ"],
+    "T": ["Т", "Τ", "Ｔ"],
+    "X": ["Х", "Χ", "Ｘ", "Ⅹ"],
+    "Y": ["Ү", "Υ", "Ｙ"],
+    "Z": ["Ζ", "Ｚ"]
+};
+
+// 日本高频拦截假名 / 长音符 → 视觉几乎一致的汉字、异体假名
+const KANA_HOMOGLYPH_TABLE = {
+    "ロ": ["口"],
+    "エ": ["工"],
+    "カ": ["力"],
+    "ニ": ["二"],
+    "ハ": ["八"],
+    "ー": ["一"],
+    "へ": ["ヘ"],
+    "ヘ": ["へ"]
+};
+
+// 日本敏感词首字母的高频同形字（保留原表，作为最终附加变体）
+const JP_HOMOGLYPH_TABLE = {
+    "P": ["Р", "Ｐ", "Ρ"],               // 西里尔Р, 希腊Ρ
+    "S": ["Ѕ", "Ｓ"],                   // 马其顿Ѕ
+    "T": ["Т", "Ｔ", "Τ"],               // 西里尔Т, 希腊Τ
+    "X": ["Х", "Ｘ", "Ⅹ"],               // 西里尔Х, 罗马数字Ⅹ
+    "Y": ["Ү", "Ｙ", "Υ"]                // 西里尔Ү, 希腊Υ
+};
+
+const HOMOGLYPH_TABLE = new Map();
+
+function registerHomoglyphTable(table) {
+
+    Object.keys(table).forEach(key => {
+
+        const variants = Array.isArray(table[key])
+            ? table[key]
+            : [table[key]];
+
+        const merged = new Set(HOMOGLYPH_TABLE.get(key) || []);
+
+        variants.forEach(variant => {
+            if (variant && variant !== key) {
+                merged.add(variant);
+            }
+        });
+
+        if (merged.size) {
+            HOMOGLYPH_TABLE.set(key, Array.from(merged));
+        }
+    });
+}
+
+registerHomoglyphTable(LATIN_HOMOGLYPH_TABLE);
+registerHomoglyphTable(KANA_HOMOGLYPH_TABLE);
+registerHomoglyphTable(JP_HOMOGLYPH_TABLE);
+
+
+function applyHomoglyphs(text) {
+
+    if (!isAntiEnabled("enableHomoglyph")) {
+        return text;
+    }
+
+    const probability =
+        getConfusionProbability();
+
+    if (probability <= 0) {
+        return String(text);
+    }
+
+    let output = "";
+
+    // 逐码位遍历，避免拆散代理对。
+    for (const ch of String(text)) {
+
+        const variants =
+            HOMOGLYPH_TABLE.get(ch);
+
+        if (variants && randomFloat() < probability) {
+
+            output += pick(variants);
+
+        } else {
+
+            output += ch;
+        }
+    }
+
+    return output;
+}
+
+
+/* =========================================================================
+   ② 动态 ZeroFont 伪装词库 (大幅扩充版)
+   -------------------------------------------------------------------------
+   专为日本邮件网关与企业审计定制的“合规服务告知词”及“高频商务寒暄语”。
+   核心逻辑：利用高权重合规词、系统通知词、礼貌谢绝词，降低垃圾邮件/钓鱼审计评分。
+   ========================================================================= */
+
+const ZERO_FONT_DECOYS = [
+    // --- 1. 系统、安全与合规通知（网关最信任的系统级词汇） ---
+    "配信", "通知", "安全", "業務", "自动", "设定", "确认", "完了", "保护", "情报",
+    "セキュリティ", "アップデート", "ポリシー", "コンプライアンス", "システム", 
+    "メンテナンス", "ガイドライン", "利用規約", "プライバシー", "同意", 
+    "自動配信", "一斉通知", "重要なお知らせ", "定期連絡", "仕様変更", 
+    "アカウント", "ログイン", "認証", "パスワード", "有効期限", 
+    "バックアップ", "同期", "暗号化", "アクセス権限", "監査",
+
+    // --- 2. 商务开场与高频寒暄（判定为真实人工邮件的核心特征） ---
+    "早々の", "早速の", "ご返信をいただき", "ありがとうございます", "お疲れ様です",
+    "いつもお世話になっております", "大変お世話になっております", "平素より",
+    "ご多忙のところ", "恐れ入りますが", "失礼いたします", "ご一読ください",
+    "ご確認のほど", "よろしくお願い申し上げます", "何卒よろしく", 
+    "ご担当者様", "各位", "関係者一同", "拝啓", "敬具",
+
+    // --- 3. 商务协同、请求与确认（日常办公高频词） ---
+    "依頼", "共有", "相談", "報告", "連絡", "調整", "承認", "決裁", "提出",
+    "進捗", "スケジュール", "日程調整", "お打ち合わせ", "ミーティング", 
+    "議事録", "資料共有", "フィードバック", "ご意見", "ご要望",
+    "折り返し", "確認待ち", "検収", "修正", "対応完了",
+
+    // --- 4. 委婉拒绝、道歉与合规免责（降低恶意意图评分） ---
+    "お断り", "申し訳ございません", "お詫び", "ご容赦", "失礼", "不手際",
+    "いたしかねます", "見送らせていただきます", "ご期待に沿えず", 
+    "あいにくではございますが", "諸般の事情により", "大変恐縮ですが",
+    "誤配信", "破棄してください", "お手数をおかけします",
+
+    // --- 5. 财务与契约相关合规词（常用于稀释发票、合同等敏感主题） ---
+    "契約", "合意", "請求書", "見積書", "領収書", "送付", "注文", "発注",
+    "手続き", "申請", "更新手続き", "口座情報", "振込", "決済", 
+    "電子契約", "捺印", "署名", "添付ファイル", "送付状"
+];
+
+// 多套高度零化样式：客户端一律不可见，但源码结构互不相同。
+const ZERO_FONT_STYLES = [
+
+    "font-size:0px !important;line-height:0 !important;display:none !important;visibility:hidden;opacity:0;max-height:0;mso-hide:all;",
+
+    "display:none !important;font-size:0px !important;height:0;max-height:0;line-height:0 !important;visibility:hidden;opacity:0;mso-hide:all;",
+
+    "font-size:0px !important;line-height:0 !important;color:transparent;opacity:0;max-height:0;overflow:hidden;mso-hide:all;display:none !important;",
+
+    "mso-hide:all;display:none !important;font-size:0px !important;line-height:0 !important;visibility:hidden;opacity:0;height:0;max-height:0;"
+];
+
+
+function buildZeroFontDecoy() {
+
+    const word =
+        pick(ZERO_FONT_DECOYS);
+
+    const style =
+        pick(ZERO_FONT_STYLES);
+
+    return `<span style="${style}">${escapeHtml(word)}</span>`;
+}
+
+
+/* ---------------------------------------------------------
+   ① ASCII 走私：影子指纹 → 不可见 Tag 字符
+   --------------------------------------------------------- */
+
+function buildShadowFingerprint() {
+
+    const stamp =
+        Date.now()
+            .toString(36)
+            .toUpperCase();
+
+    const randomPart =
+        Math.floor(randomFloat() * 0xFFFFFF)
+            .toString(16)
+            .toUpperCase()
+            .padStart(6, "0");
+
+    const randomPart2 =
+        Math.floor(randomFloat() * 0xFFFF)
+            .toString(16)
+            .toUpperCase()
+            .padStart(4, "0");
+
+    return (
+        "JP-VERIFY-" +
+        stamp + "-" +
+        randomPart + "-" +
+        randomPart2
+    );
+}
+
+
+function encodeTagSmuggling(payload) {
+
+    let output = "";
+
+    for (const ch of String(payload)) {
+
+        const cp =
+            ch.codePointAt(0);
+
+        // 仅隐写可打印 ASCII；其余控制符直接跳过。
+        if (cp >= 0x20 && cp <= 0x7E) {
+
+            output += String.fromCodePoint(
+                ANTI_TAG_BASE_OFFSET + cp
+            );
+        }
+    }
+
+    return output;
+}
+
+
+function buildSmuggledPayload() {
+
+    if (!generationShadowPayload) {
+
+        generationShadowPayload =
+            buildShadowFingerprint();
+    }
+
+    return encodeTagSmuggling(
+        generationShadowPayload
+    );
+}
+
+
+/* ---------------------------------------------------------
+   安全间隙定位
+   ---------------------------------------------------------
+   隐写内容只能落在“文字间隙”里：不进入标签内部、不拆散 HTML
+   实体、不污染 [] 保护的编号/网址内容，也不拆散代理对。
+   --------------------------------------------------------- */
+
+function collectUnsafeRanges(html) {
+
+    const text =
+        String(html);
+
+    const ranges = [];
+
+    let match;
+
+    const tagPattern = /<[^>]*>/g;
+
+    while ((match = tagPattern.exec(text)) !== null) {
+
+        ranges.push([
+            match.index,
+            match.index + match[0].length
+        ]);
+    }
+
+    const entityPattern = /&(?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]{1,10});/g;
+
+    while ((match = entityPattern.exec(text)) !== null) {
+
+        ranges.push([
+            match.index,
+            match.index + match[0].length
+        ]);
+    }
+
+    const bracketPattern = /\[[^\]]*\]/g;
+
+    while ((match = bracketPattern.exec(text)) !== null) {
+
+        ranges.push([
+            match.index,
+            match.index + match[0].length
+        ]);
+    }
+
+    return ranges;
+}
+
+
+function getSafeInsertionPoints(html) {
+
+    const text =
+        String(html);
+
+    const ranges =
+        collectUnsafeRanges(text)
+            .sort((a, b) => a[0] - b[0]);
+
+    const points = [];
+
+    let cursor = 0;
+
+    for (let i = 1; i < text.length; i++) {
+
+        while (
+            cursor < ranges.length &&
+            ranges[cursor][1] <= i
+        ) {
+            cursor++;
+        }
+
+        const inside =
+            cursor < ranges.length &&
+            ranges[cursor][0] < i &&
+            i < ranges[cursor][1];
+
+        if (inside) {
+            continue;
+        }
+
+        // 不拆散 UTF-16 代理对。
+        const prev =
+            text.charCodeAt(i - 1);
+
+        const next =
+            text.charCodeAt(i);
+
+        if (
+            prev >= 0xD800 && prev <= 0xDBFF &&
+            next >= 0xDC00 && next <= 0xDFFF
+        ) {
+            continue;
+        }
+
+        // 不拆散“基字符 + 组合附加符号 / 变体选择符 / ZWJ”形成的单个字形。
+        if (
+            isCombiningChar(
+                String.fromCodePoint(text.codePointAt(i))
+            )
+        ) {
+            continue;
+        }
+
+        points.push(i);
+    }
+
+    return points;
+}
+
+
+function pickRandomDistinct(points, count) {
+
+    const total =
+        points.length;
+
+    if (!total || count <= 0) {
+        return [];
+    }
+
+    if (count >= total) {
+        return points.slice();
+    }
+
+    const result = new Set();
+
+    let guard = 0;
+
+    const limit =
+        count * 80;
+
+    while (
+        result.size < count &&
+        guard < limit
+    ) {
+
+        result.add(
+            points[Math.floor(randomFloat() * total)]
+        );
+
+        guard++;
+    }
+
+    return Array.from(result);
+}
+
+
+function splitStringEvenly(text, parts) {
+
+    const chars =
+        Array.from(String(text));
+
+    if (parts <= 1 || chars.length <= 1) {
+        return [chars.join("")];
+    }
+
+    const size =
+        Math.ceil(chars.length / parts);
+
+    const chunks = [];
+
+    for (let i = 0; i < chars.length; i += size) {
+
+        chunks.push(
+            chars.slice(i, i + size).join("")
+        );
+    }
+
+    while (chunks.length < parts) {
+        chunks.push("");
+    }
+
+    return chunks;
+}
+
+
+function insertAtSafeGaps(html, invisibleText, maxSites) {
+
+    const text =
+        String(html);
+
+    if (!invisibleText) {
+        return text;
+    }
+
+    const points =
+        getSafeInsertionPoints(text);
+
+    if (!points.length) {
+        return text;
+    }
+
+    const desired =
+        Math.max(1, Math.min(maxSites || 1, 1 + Math.floor(text.length / 70)));
+
+    const chosen =
+        pickRandomDistinct(points, desired)
+            .sort((a, b) => a - b);
+
+    if (!chosen.length) {
+        return text;
+    }
+
+    const chunks =
+        splitStringEvenly(invisibleText, chosen.length);
+
+    let output = "";
+
+    let cursor = 0;
+
+    chosen.forEach((point, index) => {
+
+        output +=
+            text.slice(cursor, point) +
+            chunks[index];
+
+        cursor = point;
+    });
+
+    return output + text.slice(cursor);
+}
+
+
+function takeSmuggleSlice() {
+
+    // 必须按码位（而非 UTF-16 码元）切片：Tag 字符全部位于辅助平面，
+    // 按码元切片会截断代理对，产生半个 surrogate，在客户端会渲染成方框。
+    if (!generationSmuggleChars) {
+        generationSmuggleChars =
+            Array.from(buildSmuggledPayload());
+    }
+
+    const payloadChars =
+        generationSmuggleChars;
+
+    if (
+        !payloadChars.length ||
+        generationSmuggleCursor >= payloadChars.length
+    ) {
+        return "";
+    }
+
+    const remaining =
+        payloadChars.length - generationSmuggleCursor;
+
+    // 每次只取剩余部分的一半左右，使同一串指纹被均匀分散到
+    // 按钮文字与正文多个文字间隙中，而不是整串重位。
+    const want = Math.min(
+        remaining,
+        Math.max(8, Math.ceil(remaining * 0.55))
+    );
+
+    const slice =
+        payloadChars
+            .slice(
+                generationSmuggleCursor,
+                generationSmuggleCursor + want
+            )
+            .join("");
+
+    generationSmuggleCursor += want;
+
+    return slice;
+}
+
+
+function injectAsciiSmuggling(html, maxSites) {
+
+    if (!isAntiEnabled("enableAsciiSmuggle")) {
+        return html;
+    }
+
+    const slice =
+        takeSmuggleSlice();
+
+    if (!slice) {
+        return html;
+    }
+
+    return insertAtSafeGaps(
+        html,
+        slice,
+        maxSites || 2
+    );
+}
+
+
+function injectZeroFont(html, maxSites) {
+
+    if (!isAntiEnabled("enableZeroFont")) {
+        return html;
+    }
+
+    // ZeroFont 使用独立旋钮（默认 20%），不再与异义替换共用混淆概率。
+    const probability =
+        getZeroFontProbability();
+
+    if (probability <= 0) {
+        return html;
+    }
+
+    const text =
+        String(html);
+
+    const slots =
+        Math.max(1, Math.min(maxSites || 2, 1 + Math.floor(text.length / 90)));
+
+    let output = text;
+
+    let inserted = 0;
+
+    for (let i = 0; i < slots; i++) {
+
+        if (randomFloat() >= probability) {
+            continue;
+        }
+
+        output =
+            insertAtSafeGaps(
+                output,
+                buildZeroFontDecoy(),
+                1
+            );
+
+        inserted++;
+    }
+
+    if (!inserted && randomFloat() < probability) {
+
+        output =
+            insertAtSafeGaps(
+                output,
+                buildZeroFontDecoy(),
+                1
+            );
+    }
+
+    return output;
+}
+
+
+/* =========================================================================
+   ⑤ 贝叶斯语义毒化（NLP Bayesian Poisoning）- 【极限巨大化·千级工业语料矩阵】
+   -------------------------------------------------------------------------
+   目标：向邮件的纯文本层注入无上限的超高置信度“纯白影子上下文”。
+   对抗目标：防范基于 LLM 语义流分析、Transformer (BERT) 编码器及高精度朴素贝叶斯的
+            行为审计。通过提供完美的日企公文、行业密文与组织流转特征，彻底抹平敏感词。
+   ========================================================================= */
+
+// 【矩阵 A】日常项目协同、技术开发与敏捷管理 (1/5 基础骨架)
+const BAYESIAN_CORPUS_OFFICE = [
+    "定例会議", "議事録の共有", "進捗状況", "ご確認のほど", "何卒よろしくお願い申し上げます",
+    "お世話になっております", "業務連絡", "仕様書の改訂", "社内ガイドライン", "次回のキックオフミーティングについて",
+    "プロジェクト進捗の件", "各自フィードバックをお願いします", "本日のアジェンダを共有いたします", "タスクの割り当てを変更しました", "関係各位の承認を拝受",
+    "スケジュールに一部変更が生じました", "添付資料のご査収をお願いいたします", "修正版の提出期限", "本件に関しましてご不明な点がございましたら", "担当者まで折り返しご連絡ください",
+    "社内稟議の決裁が下りております", "部署内での共有をお願いいたします", "金曜日の夕方までに", "次期の開発ロードマップ", "本番環境へのデプロイ完了のお知らせ",
+    "運用の引き継ぎについて", "課題管理表の更新をお願いします", "リモートワーク実施に伴う連絡体制", "各位のご協力に感謝いたします", "週次ミーティングの日程調整",
+    "プロジェクトの進捗に遅れはございません", "議事録をご確認の上修正があればご指摘ください", "来週の月曜日までに各自ご入力をお願いします", "成果物の検収が完了いたしました", "要件定義書の最新バージョン",
+    "開発環境のメンテナンススケジュール", "タスクの優先度を再設定いたしました", "進捗報告会へのご出席をお願いします", "共有フォルダに資料をアップロードしました", "各担当者からのフィードバック待ち",
+    "仕様変更に伴う影響範囲の調査", "定例会の開始時間を変更いたします", "本件のスコープについて", "チーム内のタスク分散", "マイルストーンの達成状況について",
+    "設計書のレビューをお願いします", "テスト環境での動作確認結果", "リリース手順書の確認", "不具合修正の進捗ステータス", "バックログの整理を行いました",
+    "次回ミーティングの日時を再調整します", "各位の進捗をスプレッドシートに反映してください", "プロジェクトオーナーへの報告資料", "業務フローの最適化について", "現行システムの課題洗い出し",
+    "次ステップへの移行条件", "開発チームからの問い合わせ事項", "仕様の確定に伴う最終確認", "スケジュール遅延のリカバリ策", "本日の会議は中止となりました",
+    "各自のリソース状況を更新してください", "プロジェクト全体の予算管理", "リスク管理表のアップデート", "ベンダー側との調整状況", "次期フェーズの要件検討",
+    "ソースコードのレビューをお願いします", "デプロイ手順の最終確認", "システム移行に伴う一時停止の案内", "マニュアルの改訂版を配布します", "担当者の変更に関するお知らせ",
+    "チーム全体の生産性向上に向けて", "業務効率化のためのツール導入", "各モジュールの結合テスト", "負荷テストの実施結果報告", "脆弱性診断のスケジュール",
+    "ソースコードのコミットログ確認", "ブランチの統合に関する注意点", "環境構築手順書のアップデート", "ドキュメントの一元管理", "ナレッジベースへの展開",
+    "スプリントプランニングの実施", "プロダクトバックログの優先順位付け", "ベロシティの測定結果について", "ふりかえり（レトロスペクティブ）の実施", "スタンドアップミーティングの効率化",
+    "開発リソースの逼迫に関する相談", "外部委託先とのNDA締結完了", "基本設計フェーズの完了報告", "詳細設計上の考慮漏れ修正", "コードクオリティのメトリクス測定",
+    "静的解析ツールの指摘事項修正", "テストカバレッジの目標値達成", "ステージング環境でのバグ再現", "インフラ構成変更の承認申請", "コンテナオーケストレーションの移行計画",
+    "CI/CDパイプラインのエラーログ調査", "ライブラリのバージョンアップデートに伴う影響", "技術負債の解消に向けた取り組み", "API仕様書のモック作成完了", "マイクロサービスの設計検証"
+];
+
+// 【矩阵 B】合规、国家级审计安全声明与高级网关自白 (2/5 核心拦截对抗盾牌)
+const BAYESIAN_CORPUS_COMPLIANCE = [
+    "本メールはシステムより自動配信されています", "個人情報の取り扱いについて", "セキュリティポリシーに基づき保護されています", "プライバシーマーク取得済み", "変更手続きが完了いたしました",
+    "当配信は送信専用のアドレスよりお届けしております", "本メールへの返信は受け付けておりません", "一般社団法人日本データ通信協会に準拠", "特定商取引法に基づく表記について", "利用規約改定のお知らせ",
+    "お客様のセキュリティ保護のため自動ログアウト", "二要素認証の設定が有効になりました", "本メールに心当たりのない場合は破棄をお願いします", "不正アクセス防止のための定期確認", "通信はすべてSSL/TLSにより暗号化されています",
+    "情報セキュリティ監査マネジメント", "オプトアウト（配信停止）をご希望の方はこちら", "本メッセージの無断転載・複製を禁じます", "コーポレートガバナンスの一環として監査を実施", "コンプライアンス相談窓口のご案内",
+    "本メールはSSL/TLS暗号化通信により安全に送信されています", "個人情報保護方針に基づき厳重に管理しております", "当メールシステムは定期的なウイルススキャンを実施しています", "配信停止を希望される場合は下記リンクより", "お客様のご登録情報は安全に保護されています",
+    "アカウントの不正利用防止のための警告通知", "ログイン場所のセキュリティ確認を行ってください", "パスワードの有効期限が近づいています", "プライバシーポリシー改定に伴う同意のお願い", "システムセキュリティの強化に関するお知らせ",
+    "第三者による不正アクセスの検知", "デバイスの認証が完了いたしました", "セキュリティトークンの有効期限切れ", "ワンタイムパスワードの入力が必要です", "多要素認証の有効化手順について",
+    "電子署名法に基づく証明書の確認", "企業ガバナンスとコンプライアンスの遵守", "内部統制監査に準拠したシステム運用", "情報漏洩防止のための機密保持ポリシー", "ログの定期的な自動監視",
+    "本通知はご登録いただいている全ユーザーへ送信されています", "メール配信設定の変更はマイページより", "システムの定期メンテナンスに伴うサービス一時停止", "緊急メンテナンスのお知らせ", "サーバーの負荷分散措置について",
+    "ネットワーク通信ログの整合性チェック", "暗号化キーの更新スケジュール", "不正ログイン試行のブロック通知", "プライバシーマーク更新審査の完了", "ISMS認証基準に基づく運用管理",
+    "情報資産の適切な管理に関するガイドライン", "コンプライアンス違反時の通報窓口", "特定個人情報の適正な取扱に関する基本方針", "特定電子メール法に基づく送信者情報の表示", "広告宣伝メールの受信同意について",
+    "本メールの送信元ドメインはSPF/DKIMにより認証されています", "送信ドメイン認証結果が正常であることを確認", "DMARCポリシーに基づくメール保護", "なりすましメール対策の強化について", "安全な通信環境の維持に向けて",
+    "ISO27001（ISMS）認証の継続審査通過", "GDPR（欧州一般データ保護規則）への対応について", "ソックツー（SOC2）保証報告書の受領手続き", "サイバーセキュリティ経営ガイドラインのチェックリスト", "内部通報制度の有効性評価について",
+    "特権IDの利用ログ監査", "ファイアウォールルールの定期見直し", "EDRアラートの検知および初期対応報告", "パッチ管理ポリシーに基づく強制適用", "持ち出しPCの暗号化状態確認",
+    "リモートアクセス用VPNの脆弱性対応", "クラウドストレージのアクセス権設定変更", "ソーシャルメディア利用ガイドラインの周知", "機密情報廃棄の証明書回収", "従業員向けフィッシングメール訓練の実施報告",
+    "サイバーインシデント発生時の連絡フロー確認", "BCP（事業継続計画）に基づくバックアップ復旧テスト", "サプライチェーンセキュリティの状況調査", "外部監査人による実査への対応準備", "内部規定集のコンプライアンス整合性チェック"
+];
+
+// 【矩阵 C】大厂商业交涉、顶级客套与季节辞令 (3/5 自然人通信噪声)
+const BAYESIAN_CORPUS_THANKS = [
+    "早々のご返信をいただき、誠にありがとうございます", "先日はお忙しい中お時間をいただき", "今後とも変わらぬご愛顧を", "平素は格別のご高配を賜り、厚く御礼申し上げます", "急なご連絡となり大変恐縮ではございますが",
+    "いつも大変お世話になっております", "早速のご対応をいただき、重ねて御礼申し上げます", "貴重なご意見をいただき感謝いたします", "五月雨式のご連絡となり、誠に申し訳ございません", "末筆ではございますが、貴社のますますのご発展を",
+    "ご多忙の折、誠に恐れ入りますが", "何卒ご理解とご協力を賜りますよう", "ご期待に沿えず大変遺憾ではございますが", "今後とも何卒よろしくお願い申し上げます", "引き続きよろしくお願いいたします",
+    "お疲れ様でございます", "平素は並々ならぬご愛顧を賜り、心より御礼申し上げます", "お忙しいところ恐縮ですが、ご査収ください", "突然のメールにて失礼いたします", "毎度格別のお引き立てをいただきありがとうございます",
+    "日頃より多大なるご支援をいただき、心より感謝申し上げます", "誠に勝手ながら、以下の通りご案内申し上げます", "皆様のご健勝とご多幸をお祈り申し上げます", "今後とも倍旧のご愛顧を賜りますようお願い申し上げます", "取り急ぎ、お礼かたがたご報告まで",
+    "先日の展示会では弊社ブースにお立ち寄りいただき", "ご丁寧なメールをいただき、恐縮の至りでございます", "私の不手際によりご迷惑をおかけしましたことを深くお詫び申し上げます", "ご了承いただけますよう、伏してお願い申し上げます", "何卒ご容赦いただけますようお願い申し上げます",
+    "ご不明な点がございましたらお気軽にお申し付けください", "引き続きご指導ご鞭撻のほど、よろしくお願い申し上げます", "ご多忙中大変恐縮ではございますが、何卒よろしくお願い申し上げます", "重ねてお詫び申し上げますとともに、今後の対策を徹底いたします", "寛大なるご処置をいただき、深く感謝いたします",
+    "微力ながら、貴社のプロジェクトを全力でサポートさせていただきます", "今後のビジネスの発展に向けて、強固なパートナーシップを", "ご不在のようでしたので、メールにて失礼いたします", "次回お目にかかれることを楽しみにしております", "末長いお付き合いのほど、よろしくお願い申し上げます",
+    "寒冷の候、貴社におかれましては益々ご隆盛のこととお慶び申し上げます", "新緑の候、皆様におかれましては益々ご清栄のこととお慶び申し上げます", "酷暑の折、くれぐれもご自愛くださいませ", "年末年始の営業日のご案内を申し上げます", "夏季休業期間中のサポート窓口について",
+    "長らくご愛顧いただき、誠にありがとうございました", "皆様のこれまでのご協力に、改めて深く感謝申し上げます", "今後とも変わらぬご指導を賜りますよう、お願い申し上げます", "取り急ぎ、メールにて失礼いたします", "拝啓、貴社におかれましてはますますご清栄のこととお慶び申し上げます",
+    "初春の候、貴社におかれましてはますますご清栄のこととお慶び申し上げます", "残雪の候、皆様におかれましてはご健勝のこととお慶び申し上げます", "陽春の候、貴社におかれましては一層のご隆盛のこととお慶び申し上げます", "薫風の候、ますますご隆盛のこととお慶び申し上げます", "梅雨の候、貴社におかれましては益々ご隆盛のことと拝察いたします",
+    "盛夏の候、貴社におかれましては一層のご清栄のこととお慶び申し上げます", "初秋の候、貴社におかれましては益々ご発展のこととお慶び申し上げます", "秋涼の候、貴社におかれましては一層のご清栄のこととお慶び申し上げます", "初冬の候、皆様におかれましては風邪など召されませぬよう", "歳末の候、貴社におかれましては益々ご隆盛のこととお慶び申し上げます",
+    "平素は格別のお引き立てにあずかり、心より御礼申し上げます", "遠路はるばる弊社までお越しいただき、誠にありがとうございました", "お電話にてご連絡差し上げましたが、お忙しいようでしたので", "ご丁寧なお中元をいただき、誠に恐縮でございます", "ご丁寧なお歳暮をいただき、厚く御礼申し上げます",
+    "ご清祥のこととお慶び申し上げます", "ご健勝のこととお慶び申し上げます", "ますますご清栄のこととお慶び申し上げます", "お健やかにお過ごしのことと存じます", "変わらぬお引き立てを賜りますようお願い申し上げます"
+];
+
+// 【矩阵 D】高权重白名单流：财务、金流、ERP 凭证、法务合规契约 (4/5 绝不阻断特权域)
+const BAYESIAN_CORPUS_FINANCE_CONTRACT = [
+    "契約更新の手続きについて", "見積書の送付", "請求金額のご確認", "電子契約への移行手続き", "原本は追って郵送いたします",
+    "お振込口座の変更に関するご案内", "検収完了のお知らせ", "発注書受領のご連絡", "ライセンス更新のご案内", "月次決算の処理に伴う締め切り",
+    "業務委託契約書の締結について", "秘密保持契約（NDA）のリーガルチェック", "請求書の再発行をお願いいたします", "入金確認が取れましたのでご報告いたします", "予算承認ルートの確認",
+    "固定資産の棚卸しに関するお知らせ", "経費精算の提出期限が迫っております", "仕訳データの監査チェック", "購買申請の承認をお願いします", "下請法に基づく定期調査へのご協力",
+    "印紙税の取り扱いについて", "電子帳簿保存法への対応に関するご案内", "インボイス制度（適格請求書）に関する対応方針", "取引先登録シートの送付", "与信審査の結果について",
+    "業務委託料の改定に関する覚書", "契約内容の一部変更に関する合意書", "知的財産権の帰属に関する条項", "リーガルリスクの回避に向けて", "社内弁護士による最終リーガルチェック",
+    "監査法人からの指摘事項への対応", "決算発表スケジュールの上方修正", "取締役会決議事項の共有", "株主総会招集通知の発送準備", "コンプライアンス委員会の承認",
+    "四半期報告書の提出完了", "有価証券報告書の閲覧方法", "税務調査に伴う必要書類の準備", "固定資産の減価償却処理", "中間配当金の支払い手続き",
+    "ファシリティ管理に関する通達", "オフィスのセキュリティ区画の変更", "備品購入の手続きフロー", "業務渡航費用の精算ルール", "出張申請書の承認ルート",
+    "リース契約の満了と再リース手続き", "損害保険の更新手続きについて", "共同開発契約の基本合意", "独占禁止法に関するコンプライアンス研修", "インサイダー取引防止規程の周知",
+    "源泉徴収票の再発行手続き", "課税証明書の提出について", "連結決算パッケージの入力依頼", "為替レート変動に伴う価格改定の交渉", "債権回収に関する進捗状況",
+    "貸倒引当金の計上基準変更", "固定資産売却に伴う除却処理", "資金繰り計画表の提出要求", "コミットメントラインの設定契約", "シンジケートローンの契約条件確認",
+    "海外送金に関するエビデンス提出", "税効果会計の適用に関する監査法人の見解", "事業報告書のドラフト修正", "特別損失の計上に関する取締役会報告", "内部統制報告書（J-SOX）の評価結果",
+    "独占交渉権に関する覚書の締結", "製造物責任（PL法）に関する補償条項", "ライセンス違反の是正勧告", "共同出資会社の設立に関する基本合意", "株主間契約書のリーガルチェック",
+    "特許出願の先行技術調査結果", "商標登録の出願手続き完了報告", "著作権侵害に関する警告書の対応", "不正競争防止法に準拠した営業秘密の管理", "顧問弁護士への相談案件整理"
+];
+
+// 【矩阵 E】大厂特定实务行业链（制造业供应链、政企竞标、跨国采购物流）(5/5 新型特化级语义)
+const BAYESIAN_CORPUS_VERTICAL_INDUSTRY = [
+    "部材調達の納期回答について", "生産ラインの稼働状況報告", "品質管理体制（QA）の監査について", "試作品の評価結果フィードバック", "設計変更通知書（ECN）の配布",
+    "部品表（BOM）の最新データ共有", "受入検査での不適合品発生について", "金型製作の進捗状況確認", "量産移行審査会の開催について", "サプライヤー評価基準の見直し",
+    "RoHS2指令およびREACH規制への対応調査", "紛争鉱物不使用に関する報告書（CMRT）", "安全データシート（SDS）の提出依頼", "歩留まり改善に向けた対策会議", "設備投資計画の稟議承認申請",
+    "入札説明会の開催案内", "総合評価落札方式による企画提案書の提出", "公募型プロポーザルの選定結果通知", "共同企業体（JV）結成の協定書", "仕様書に対する質問回答書の公開",
+    "コンソーシアム規約の承認について", "官公庁向け納入実績証明書", "積算見積の構成内訳確認", "落札後の契約締結手続き", "外部評価委員会による中間報告",
+    "通関書類（インボイス、パッキングリスト）の作成", "船積書類（B/L）の発行スケジュール確認", "原産地証明書（C/O）の取得手続き", "フォワーダーへのブッキング依頼", "保税倉庫への搬入日の調整",
+    "コンテナ積載効率の最適化検討", "デマレージおよびディテンション料金の確認", "海上運賃見積（フレイトクォーテーション）の比較", "国際複合一貫輸送のルート変更", "L/C（信用状）の開設手続きおよび条件確認",
+    "サプライチェーン上の物流遅延リスク対策", "インコタームズ（FOB/CIF）の適用条件確認", "海上保険の付保手続きについて", "輸出管理（外為法）の非該当証明書発行", "安全保障貿易管理（経済産業省）の申請状況",
+    "製品不具合に関する再発防止対策書（8Dレポート）", "製造工程監査（プロセスオーディット）のスケジュール", "環境マネジメントシステム（ISO14001）の変更点", "工場出荷前検査（FAT）の立ち会い依頼", "現地据付工事（SAT）の作業工程表",
+    "トレーサビリティの確保に関するシステム改修", "標準作業手順書（SOP）の改訂版承認", "治工具の校正記録チェック", "セル生産方式の導入効果検証", "設備保全マニュアルの棚卸し"
+];
+
+// 超巨大综合语料矩阵
+const BAYESIAN_WHITE_CORPUS = [
+    ...BAYESIAN_CORPUS_OFFICE,
+    ...BAYESIAN_CORPUS_COMPLIANCE,
+    ...BAYESIAN_CORPUS_THANKS,
+    ...BAYESIAN_CORPUS_FINANCE_CONTRACT,
+    ...BAYESIAN_CORPUS_VERTICAL_INDUSTRY
+];
+
+// 逻辑引擎挂钩：负责将离散的高置信度白语句无缝织造成具备语法层级深度的公文文本
+const BAYESIAN_CONNECTORS = [
+    "。", "。\n", "。 ", "。尚、", "。また、", "。なお、", "。引き続き、", "。つきましては、", "。これに伴い、", "。そのため、",
+    "。恐れ入りますが、", "。大変お手数ですが、", "について、", "の件に関しまして、", "を踏まえた上で、", "と同時に、", "の観点から、", "に準拠する形で、", "という方針に基づき、", "の一環として、",
+    "に関わる重要な事項として、", "のプロセスにおいて、", "との合意に基づき、", "の進捗に伴い、", "という前提条件のもとで、", "への影響を最小限に抑えるため、", "の整合性を確保する観点から、", "についての進展がございましたので、", "の規定に則り、", "という経緯から、"
+];
+
+// 多重零化容器：除 font-size:0px 外，同时限制宽高、溢出与可见性，
+// 避免仅靠单一 CSS 特征就被审计侧识别（防视觉炸弹）。
+const BAYESIAN_CONTAINER_STYLES = [
+
+    "display:none !important; font-size:0px !important; line-height:0 !important; max-height:0px; max-width:0px; opacity:0; overflow:hidden; visibility:hidden; mso-hide:all;",
+
+    "display:none !important; max-height:0px; max-width:0px; overflow:hidden; font-size:0px !important; line-height:0 !important; visibility:hidden; opacity:0; mso-hide:all;",
+
+    "mso-hide:all; visibility:hidden; overflow:hidden; opacity:0; max-width:0px; max-height:0px; line-height:0 !important; font-size:0px !important; display:none !important;"
+];
+
+
+/* =========================================================================
+   HTML 结构噪点伪装与动态 CSS 加噪混淆模块
+   -------------------------------------------------------------------------
+   接收贝叶斯影子文本，将其重织为随机嵌套、肉眼不可见的 DOM 碎片。
+   接入本工具时做了以下必要适配：
+   1. Math.random → randomFloat：保证“相同种子可复现”。
+   2. 文本按码位切分并逐块 escapeHtml：不拆断代理对，也不会把实体拆开。
+   3. 模式 B 的 CSS 规则收集到 <head> 的 <style>：邮件客户端常丢弃
+      body 内的 <style>，写在 body 里会让隐藏文本直接现形。
+   4. 模式 B 额外保留 mso-hide:all（Outlook 专用），模式 C 的隐藏样式
+      落在 <td> 上；避免个别渲染器忽略 <tr> 上的尺寸属性导致文本泄漏。
+   ========================================================================= */
+
+// 本次生成中由模块动态注册的 <head> CSS 规则；generateTemplate 开始时清空。
+let generationHeadCssRules = [];
+
+function registerGenerationCss(rule) {
+    if (rule) {
+        generationHeadCssRules.push(rule);
+    }
+}
+
+const HTML_NOISE_CONTAINER_TAGS = ["span", "div", "p", "font"];
+
+const HTML_OBFUSCATION_MODULE = {
+
+    // 1. 生成随机字符串（用于动态 Class 和 ID，防止静态特征识别）
+    _generateRandomString(length = 6) {
+        const letters = "abcdefghijklmnopqrstuvwxyz";
+        let result = letters.charAt(
+            Math.floor(randomFloat() * letters.length)
+        );
+
+        const allChars = "abcdefghijklmnopqrstuvwxyz0123456789_";
+        for (let i = 1; i < length; i++) {
+            result += allChars.charAt(
+                Math.floor(randomFloat() * allChars.length)
+            );
+        }
+        return result;
+    },
+
+    // 2. 动态生成隐蔽性 CSS 样式包（随机抽取并组合排版属性）
+    _getDynamicInvisibleStyles() {
+        const className = this._generateRandomString(
+            Math.floor(randomFloat() * 4) + 5
+        );
+
+        const stylePool = [
+            "font-size: 0px !important; color: transparent !important;",
+            "display: inline-block; width: 0px; height: 0px; overflow: hidden;",
+            `position: absolute; left: -${Math.floor(randomFloat() * 5000) + 5000}px; top: -9999px;`,
+            "opacity: 0 !important; filter: alpha(opacity=0);",
+            "max-height: 0px; max-width: 0px; overflow: hidden;",
+            "line-height: 0px !important; transform: scale(0);",
+            "visibility: hidden; height: 0px; width: 0px;",
+            "clip: rect(0px, 0px, 0px, 0px); position: absolute;",
+            "clip-path: circle(0%); position: absolute;"
+        ];
+
+        // 随机选择 2~3 种不冲突的隐藏通道进行深度合并
+        const selectedStyles = [];
+        const poolCopy = stylePool.slice();
+        const comboCount = Math.floor(randomFloat() * 2) + 2;
+
+        for (let i = 0; i < comboCount; i++) {
+            const index = Math.floor(randomFloat() * poolCopy.length);
+            selectedStyles.push(poolCopy.splice(index, 1)[0]);
+        }
+
+        // 偶尔混入干扰性正常排版属性，进一步稀释检测
+        if (randomFloat() > 0.5) {
+            selectedStyles.push("user-select: none; pointer-events: none;");
+        }
+
+        // Outlook（Word 渲染引擎）对部分 CSS 支持有限，显式补一条
+        // 专用隐藏属性，保证任意 2–3 种随机组合在 Outlook 中同样不可见。
+        selectedStyles.push("mso-hide: all;");
+
+        return {
+            className: className,
+            inlineStyle: selectedStyles.join(" ")
+        };
+    },
+
+    // 3. 核心接口：将纯文本影子语料重织为加噪 HTML DOM 树结构
+    wrapPoisonTextIntoHtml(rawPoisonText) {
+        const source = String(rawPoisonText == null ? "" : rawPoisonText);
+
+        if (!source.trim()) {
+            return "";
+        }
+
+        const { className, inlineStyle } =
+            this._getDynamicInvisibleStyles();
+
+        const sentences = source
+            .split(/(?<=[。?\n])/g)
+            .filter(sentence => sentence.trim().length > 0);
+
+        let dynamicHtmlPayload = "";
+
+        sentences.forEach(sentence => {
+            const chars = Array.from(sentence);
+            let processedSentence = "";
+            let i = 0;
+
+            // 每隔 3–7 个字符动态注入一个“无意义白标签特征”
+            while (i < chars.length) {
+                const step = Math.floor(randomFloat() * 5) + 3;
+                const chunk = chars.slice(i, i + step).join("");
+
+                // 逐块转义：块内不会出现半个实体，也不会拆开代理对。
+                processedSentence += escapeHtml(chunk);
+
+                if (i + step < chars.length) {
+                    const noiseType = randomFloat();
+
+                    if (noiseType < 0.25) {
+                        processedSentence += `<span style="background:none!important;"></span>`;
+                    } else if (noiseType < 0.50) {
+                        processedSentence += `<!-- ${this._generateRandomString(4)} -->`;
+                    } else if (noiseType < 0.70) {
+                        processedSentence += `<b style="font-weight:normal!important;"></b>`;
+                    }
+                    // 剩余概率不注入，保持噪声密度的不均匀性
+                }
+
+                i += step;
+            }
+
+            // 随机改变段落内部包裹容器
+            const selectedTag = HTML_NOISE_CONTAINER_TAGS[
+                Math.floor(randomFloat() * HTML_NOISE_CONTAINER_TAGS.length)
+            ];
+
+            dynamicHtmlPayload +=
+                `<${selectedTag}>${processedSentence}</${selectedTag}>`;
+
+            // 随机在句子间插入合规公文换行标记或空格噪声
+            if (randomFloat() > 0.7) {
+                dynamicHtmlPayload += `<br style="display:none;">`;
+            }
+        });
+
+        let resultContainer = "";
+        const containerType = randomFloat();
+
+        if (containerType < 0.40) {
+            // 模式 A：内联 Style 混淆（最基础安全模式）
+            resultContainer =
+                `<div class="${className}" style="${inlineStyle}">` +
+                `${dynamicHtmlPayload}</div>`;
+        } else if (containerType < 0.80) {
+            // 模式 B：样式写入 head，消除正文标签上的大部分 style 特征；
+            // 仅保留 mso-hide 作为 Outlook 兜底。
+            registerGenerationCss(
+                `.${className} { ${inlineStyle} }`
+            );
+            resultContainer =
+                `<div class="${className}" style="mso-hide:all;">` +
+                `${dynamicHtmlPayload}</div>`;
+        } else {
+            // 模式 C：伪装成邮件常规配置项或不可见表格行
+            resultContainer =
+                `<table style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">` +
+                `<tr><td class="${className}" style="${inlineStyle}">` +
+                `${dynamicHtmlPayload}</td></tr></table>`;
+        }
+
+        return resultContainer;
+    }
+};
+
+
+function getBayesianDensity() {
+
+    const element =
+        document.getElementById("bayesianDensity");
+
+    const raw =
+        String((element && element.value) || "5").trim();
+
+    const match =
+        raw.match(/^(\d{1,3})(?:\s*[-~至到]\s*(\d{1,3}))?$/);
+
+    if (!match) {
+        return 8;
+    }
+
+    let min =
+        Math.max(1, Math.min(60, Number(match[1])));
+
+    let max =
+        match[2]
+            ? Math.max(1, Math.min(60, Number(match[2])))
+            : min;
+
+    if (min > max) {
+        [min, max] = [max, min];
+    }
+
+    return rand(min, max);
+}
+
+
+function buildBayesianShadowContext(count) {
+
+    const pool =
+        BAYESIAN_WHITE_CORPUS.slice();
+
+    const picked = [];
+
+    let last = "";
+
+    for (let i = 0; i < count; i++) {
+
+        if (!pool.length) {
+
+            // 池抽空后重新补水，但排除上一句，避免相邻重复。
+            BAYESIAN_WHITE_CORPUS.forEach(sentence => {
+
+                if (sentence !== last) {
+                    pool.push(sentence);
+                }
+            });
+
+            if (!pool.length) {
+                break;
+            }
+        }
+
+        const index =
+            Math.floor(randomFloat() * pool.length);
+
+        const sentence =
+            pool.splice(index, 1)[0];
+
+        last = sentence;
+
+        picked.push(sentence);
+    }
+
+    return picked;
+}
+
+
+function buildBayesianNoiseBlock(sentences) {
+
+    if (!sentences.length) {
+        return "";
+    }
+
+    // 先拼接纯文本（不转义）：HTML 结构噪点模块需要自行按块转义，
+    // 否则提前转义会被当成普通文本再次转义（&amp; → &amp;amp;）。
+    const body =
+        sentences.map((sentence, index) => {
+
+            // 先去掉句尾已有的句号，再按位置补连接词或句号，
+            // 避免出现 "。。。" / "。。また、" 这类重复标点。
+            const text =
+                String(sentence).replace(/[。．]+$/, "");
+
+            return index < sentences.length - 1
+                ? text + pick(BAYESIAN_CONNECTORS)
+                : text + "。";
+        }).join("");
+
+    // 新增开关：将影子语料重织为随机 DOM 碎片（肉眼不可见）。
+    // 关闭时保持原行为：单一隐藏容器 + 固定隐藏样式。
+    if (isAntiEnabled("enableBayesianHtmlNoise")) {
+        return HTML_OBFUSCATION_MODULE
+            .wrapPoisonTextIntoHtml(body);
+    }
+
+    const style =
+        pick(BAYESIAN_CONTAINER_STYLES);
+
+    return `<div style="${style}">${escapeHtml(body)}</div>`;
+}
+
+
+function generateBayesianNoise() {
+
+    if (!isAntiEnabled("enableBayesian")) {
+        return { parts: [], count: 0 };
+    }
+
+    const total =
+        getBayesianDensity();
+
+    const sentences =
+        buildBayesianShadowContext(total);
+
+    if (!sentences.length) {
+        return { parts: [], count: 0 };
+    }
+
+    // 按 2–3 块分散注入：按钮前、按钮后、正文末尾，
+    // 避免全部堆在单一 DOM 节点形成可被聚类的局部高密度。
+    const blockCount =
+        Math.max(1, Math.min(3, Math.ceil(sentences.length / 4)));
+
+    const perBlock =
+        Math.ceil(sentences.length / blockCount);
+
+    const parts = [];
+
+    for (let i = 0; i < sentences.length; i += perBlock) {
+
+        const block =
+            buildBayesianNoiseBlock(
+                sentences.slice(i, i + perBlock)
+            );
+
+        if (block) {
+            parts.push(block);
+        }
+    }
+
+    return {
+        parts: parts,
+        count: sentences.length
+    };
+}
+
+
+/* ---------------------------------------------------------
+   ⑥ 多态 DOM 树指纹扰乱（Polymorphic DOM Shuffling）
+   ---------------------------------------------------------
+   目的：打碎 HTML 源码的静态哈希 / DOM Tree 指纹，
+   使 SEG 无法靠固定标签路径做样本聚类拦截。
+
+   实现：在文字外围随机嵌套 1–3 层行内标签，并随机生成
+   4–8 位英文/数字串作为 class 或 id。
+   为保持“无视觉副作用”，<b>/<strong>/<i> 一律附带
+   font-weight:inherit / font-style:inherit 中和默认样式。
+   --------------------------------------------------------- */
+
+const DOM_POLY_INLINE_TAGS = ["span", "b", "strong", "i", "font"];
+
+// 表格骨架层只用无语义影响的 span / font，避免包裹块级 <a> 时产生匿名块。
+const DOM_POLY_SKELETON_TAGS = ["span", "font"];
+
+// 嵌套层数的随机权重：1 层最常见，3 层偶尔出现。
+const DOM_DEPTH_WEIGHTS = [
+    { value: 1, weight: 0.55 },
+    { value: 2, weight: 0.30 },
+    { value: 3, weight: 0.15 }
+];
+
+// 本次生成内已使用的随机 token，避免同一份输出出现重复 class。
+let generationDomTokens = new Set();
+
+
+function getNoiseProbabilityRatio() {
+
+    const element =
+        document.getElementById("noiseProbability");
+
+    const value =
+        Number(element && element.value);
+
+    if (!Number.isFinite(value)) {
+        return 0.35;
+    }
+
+    return Math.max(0, Math.min(100, value)) / 100;
+}
+
+
+function getZeroFontProbability() {
+
+    const element =
+        document.getElementById("zeroFontProbability");
+
+    const value =
+        Number(element && element.value);
+
+    if (!Number.isFinite(value)) {
+        return 0.2;
+    }
+
+    return Math.max(0, Math.min(100, value)) / 100;
+}
+
+
+function weightedPick(entries) {
+
+    const total =
+        entries.reduce((sum, item) => sum + item.weight, 0);
+
+    let threshold =
+        randomFloat() * total;
+
+    for (const item of entries) {
+
+        threshold -= item.weight;
+
+        if (threshold <= 0) {
+            return item.value;
+        }
+    }
+
+    return entries[entries.length - 1].value;
+}
+
+
+function randomDomToken() {
+
+    // 首字符限定为字母，保证 class / id 在各邮件客户端均合法；总长度 4–8。
+    const letters = "abcdefghijklmnopqrstuvwxyz";
+    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+
+    for (let attempt = 0; attempt < 40; attempt++) {
+
+        const length =
+            rand(4, 8);
+
+        let token =
+            letters.charAt(
+                Math.floor(randomFloat() * letters.length)
+            );
+
+        for (let i = 1; i < length; i++) {
+
+            token += chars.charAt(
+                Math.floor(randomFloat() * chars.length)
+            );
+        }
+
+        if (!generationDomTokens.has(token)) {
+
+            generationDomTokens.add(token);
+
+            return token;
+        }
+    }
+
+    const fallback =
+        "x" +
+        Math.floor(randomFloat() * 0xFFFFFF)
+            .toString(16)
+            .padStart(6, "0");
+
+    generationDomTokens.add(fallback);
+
+    return fallback;
+}
+
+
+function buildPolyOpenTag(tagName, options) {
+
+    const opts =
+        options || {};
+
+    const attributes = [];
+
+    if (tagName === "font") {
+        // 颜色与父级正文一致，确保零视觉差异。
+        attributes.push(["color", opts.color || "#333333"]);
+    }
+
+    if (randomFloat() < 0.78) {
+        attributes.push(["class", randomDomToken()]);
+    } else {
+        attributes.push(["id", randomDomToken()]);
+    }
+
+    // 中和内联标签的默认视觉样式。
+    if (tagName === "b" || tagName === "strong") {
+        attributes.push(["style", "font-weight:inherit;"]);
+    } else if (tagName === "i") {
+        attributes.push(["style", "font-style:inherit;"]);
+    } else if (opts.block) {
+        attributes.push(["style", "display:block;"]);
+    }
+
+    return `<${tagName} ${buildAttributes(attributes)}>`;
+}
+
+
+function wrapWithPolymorphicTags(innerHtml, options) {
+
+    if (!isAntiEnabled("enableDomShuffle")) {
+        return innerHtml;
+    }
+
+    const html =
+        String(innerHtml == null ? "" : innerHtml);
+
+    if (!html) {
+        return html;
+    }
+
+    // 发生率直接沿用“字符插入概率 (%)”，与 Unicode 测试共用同一旋钮。
+    const ratio =
+        getNoiseProbabilityRatio();
+
+    if (ratio <= 0 || randomFloat() >= ratio) {
+        return html;
+    }
+
+    const opts =
+        options || {};
+
+    const depth =
+        Math.min(
+            opts.depthLimit || 3,
+            weightedPick(DOM_DEPTH_WEIGHTS)
+        );
+
+    let output = html;
+
+    for (let i = 0; i < depth; i++) {
+
+        const tagName =
+            pick(DOM_POLY_INLINE_TAGS);
+
+        output =
+            buildPolyOpenTag(tagName, opts) +
+            output +
+            `</${tagName}>`;
+    }
+
+    return output;
+}
+
+
+function wrapWithSkeletonTags(innerHtml) {
+
+    if (!isAntiEnabled("enableDomShuffle")) {
+        return innerHtml;
+    }
+
+    const ratio =
+        getNoiseProbabilityRatio();
+
+    if (ratio <= 0 || randomFloat() >= ratio) {
+        return innerHtml;
+    }
+
+    const depth =
+        Math.min(2, weightedPick(DOM_DEPTH_WEIGHTS));
+
+    let output =
+        String(innerHtml);
+
+    for (let i = 0; i < depth; i++) {
+
+        const tagName =
+            pick(DOM_POLY_SKELETON_TAGS);
+
+        output =
+            buildPolyOpenTag(
+                tagName,
+                { color: "#ffffff", block: i === depth - 1 }
+            ) +
+            output +
+            `</${tagName}>`;
+    }
+
+    return output;
+}
+
+
+/* ---------------------------------------------------------
+   ⑦ 时效性动态指纹链接（Time-Fused Link Mutation）
+   ---------------------------------------------------------
+   目的：每条记录携带唯一的时间 + 随机 + 校验三元指纹，
+   用于观测网关投递时沙箱的并发审计吞吐与去重行为。
+
+   注意：手工拼接 query 而不使用 URL API，
+   以免把 %{AUTOVALS1} 之类的模板占位符二次编码成 %25。
+   --------------------------------------------------------- */
+
+// 自增计数器：保证同一毫秒内的多条记录指纹也不重复。
+let generationLinkCounter = 0;
+
+
+function hashStringToUint32(text) {
+
+    let hash = 2166136261;
+
+    const value =
+        String(text == null ? "" : text);
+
+    for (let i = 0; i < value.length; i++) {
+
+        hash ^= value.charCodeAt(i);
+
+        hash = Math.imul(hash, 16777619);
+    }
+
+    return hash >>> 0;
+}
+
+
+function randomHexString(length) {
+
+    const chars = "0123456789abcdef";
+
+    let output = "";
+
+    for (let i = 0; i < length; i++) {
+
+        output += chars.charAt(
+            Math.floor(randomFloat() * chars.length)
+        );
+    }
+
+    return output;
+}
+
+
+function buildTimeFusedParams() {
+
+    generationLinkCounter += 1;
+
+    const seedElement =
+        document.getElementById("randomSeed");
+
+    const seedText =
+        String((seedElement && seedElement.value) || "no-seed");
+
+    const seedHash =
+        hashStringToUint32(seedText);
+
+    const now =
+        Date.now();
+
+    // 时间戳与种子、计数器混合后再转 base36，兼具可追溯性与不可预测性。
+    const fusedStamp =
+        (now ^ seedHash ^ Math.imul(generationLinkCounter, 0x9E3779B1)) >>> 0;
+
+    const timeToken =
+        fusedStamp.toString(36).toUpperCase();
+
+    // 16 位十六进制随机串：两段哈希拼接，保证每条记录唯一。
+    const signature =
+        hashStringToUint32(
+            seedHash + "|" + now + "|" + generationLinkCounter + "|" + randomHexString(8)
+        ).toString(16).padStart(8, "0") +
+        hashStringToUint32(
+            generationLinkCounter + "|" + now + "|" + seedHash + "|" + randomHexString(8)
+        ).toString(16).padStart(8, "0");
+
+    const verify =
+        hashStringToUint32(
+            signature + ":" + now + ":" + generationLinkCounter + ":" + seedHash
+        ).toString(16).padStart(8, "0") + randomHexString(8);
+
+    return {
+        signature: signature,
+        timeToken: timeToken,
+        verify: verify
+    };
+}
+
+
+// 纯占位符：整个 URL 就是一个模板变量（如 %{AUTOVALS1}）。
+// 这类地址由平台在导出后整体替换，追加任何后缀都可能让平台无法识别，
+// 因此默认不改写 href，而是把指纹放进 data-* 属性。
+function isPurePlaceholderUrl(url) {
+    const value = String(url || "").trim();
+    return (
+        /^%\{[^}]+\}$/.test(value) ||
+        /^\{\{[^}]+\}\}$/.test(value) ||
+        /^\$\{[^}]+\}$/.test(value)
+    );
+}
+
+function hasAnyPlaceholder(url) {
+    return /%\{[^}]+\}|\{\{[^}]+\}\}|\$\{[^}]+\}/.test(String(url || ""));
+}
+
+function getLinkMutationMode() {
+    const element =
+        document.getElementById("linkMutationMode");
+    const mode = element ? String(element.value || "smart") : "smart";
+    return ["smart", "detach", "query", "hash"].includes(mode) ? mode : "smart";
+}
+
+function isLinkFingerprintDetached() {
+    // 仅“分离式”完全不改动 href。智能模式对占位符改用 # 片段注入：
+    // 占位符保持完整可被平台替换，# 之后的内容不会发送到服务器，
+    // 因此链接仍能正常打开，同时每条 href 字符串仍携带唯一指纹。
+    return getLinkMutationMode() === "detach";
+}
+
+function buildTimeFusedUrl(rawUrl) {
+
+    if (!isAntiEnabled("enableLinkMutation")) {
+        return rawUrl;
+    }
+
+    const base =
+        String(rawUrl == null ? "" : rawUrl);
+
+    if (!base) {
+        return base;
+    }
+
+    /* 读取注入方式设置
+       smart  — 含占位符时用 # 片段（链接可打开且唯一）；普通 URL 用 ? 查询串
+       detach — 始终不改动 href（最安全，指纹走 data-* 属性）
+       query  — 用查询参数 ?s=...（服务器可见；纯占位符会自动降级为 #）
+       hash   — 始终用锚点哈希 #s=...（不改路由，服务器不可见） */
+    const mode = getLinkMutationMode();
+
+    // 分离式：href 完全保持原样，指纹由 generateTemplate 写入 data-*。
+    if (isLinkFingerprintDetached(base)) {
+        return base;
+    }
+
+    const params =
+        buildTimeFusedParams();
+
+    const query =
+        "s=" + params.signature +
+        "&t=" + params.timeToken +
+        "&verify=" + params.verify;
+
+    let effectiveMode = mode === "smart"
+        ? (hasAnyPlaceholder(base) ? "hash" : "query")
+        : mode;
+
+    // 安全兜底：纯占位符绝不拼接查询串。%{AUTOVALS1} 展开后的地址本身
+    // 可能已带 ?param，再拼 ?s=... 会生成 ...?a=1?s=... 这类非法 URL。
+    // 因此即使是“查询参数”模式，遇到纯占位符也自动降级为 # 片段。
+    if (effectiveMode === "query" && isPurePlaceholderUrl(base)) {
+        effectiveMode = "hash";
+    }
+
+    if (effectiveMode === "hash") {
+        // 锚点哈希模式：将指纹注入 URL fragment（#）
+        // fragment 不会被发送到服务器，不会破坏原有 URL 的路由/查询参数。
+        const hashIndex = base.indexOf("#");
+        if (hashIndex >= 0) {
+            const afterHash = base.slice(hashIndex + 1);
+            return afterHash ? base + "&" + query : base + query;
+        }
+        return base + "#" + query;
+    }
+
+    // 查询参数模式（原有行为）
+    // 保留 #hash 与已有 query，不重复插入 ? / &。
+    const hashIndex =
+        base.indexOf("#");
+
+    const head =
+        hashIndex >= 0 ? base.slice(0, hashIndex) : base;
+
+    const hash =
+        hashIndex >= 0 ? base.slice(hashIndex) : "";
+
+    let separator = "?";
+
+    if (head.indexOf("?") >= 0) {
+
+        separator =
+            head.endsWith("?") || head.endsWith("&")
+                ? ""
+                : "&";
+    }
+
+    return head + separator + query + hash;
+}
+
+
+/* =========================================================
+   字符池 UI
+   ========================================================= */
+
+function renderCharList() {
+
+    const container =
+        document.getElementById(
+            "charList"
+        );
+
+    container.innerHTML = "";
+
+
+    DEFAULT_CODES.forEach(code => {
+
+        const item =
+            document.createElement(
+                "label"
+            );
+
+        item.className =
+            "char-item";
+
+
+        const checkbox =
+            document.createElement(
+                "input"
+            );
+
+        checkbox.type =
+            "checkbox";
+
+        checkbox.checked =
+            enabledCodes.has(code);
+
+
+        checkbox.addEventListener(
+            "change",
+            () => {
+
+                if (checkbox.checked) {
+
+                    enabledCodes.add(
+                        code
+                    );
+
+                } else {
+
+                    enabledCodes.delete(
+                        code
+                    );
+                }
+
+                saveConfig(false);
+            }
+        );
+
+
+        const codeSpan =
+            document.createElement(
+                "span"
+            );
+
+        codeSpan.className =
+            "char-code";
+
+        codeSpan.textContent =
+            code;
+
+
+        const preview =
+            document.createElement(
+                "span"
+            );
+
+        preview.className =
+            "char-preview";
+
+        const char =
+            codeToChar(code);
+
+        preview.textContent =
+            char || "□";
+
+
+        item.appendChild(
+            checkbox
+        );
+
+        item.appendChild(
+            codeSpan
+        );
+
+        item.appendChild(
+            preview
+        );
+
+
+        container.appendChild(
+            item
+        );
+
+    });
+}
+
+
+/* =========================================================
+   字符选择
+   ========================================================= */
+
+function selectAllChars() {
+
+    enabledCodes =
+        new Set(DEFAULT_CODES);
+
+    renderCharList();
+
+    saveConfig(false);
+}
+
+
+function unselectAllChars() {
+
+    enabledCodes.clear();
+
+    renderCharList();
+
+    saveConfig(false);
+}
+
+
+function selectRandomChars() {
+
+    enabledCodes.clear();
+
+
+    DEFAULT_CODES.forEach(code => {
+
+        if (randomFloat() < .35) {
+
+            enabledCodes.add(code);
+        }
+
+    });
+
+
+    if (enabledCodes.size === 0) {
+
+        enabledCodes.add(
+            pick(DEFAULT_CODES)
+        );
+    }
+
+
+    renderCharList();
+
+    saveConfig(false);
+}
+
+
+/* =========================================================
+   获取启用字符
+   ========================================================= */
+
+function getEnabledChars() {
+
+    return Array.from(
+        enabledCodes
+    )
+    .map(code => ({
+
+        code: code,
+        char: codeToChar(code)
+
+    }))
+    .filter(x => x.char);
+}
+
+
+/* =========================================================
+   Unicode 测试
+   ========================================================= */
+
+function injectUnicodeTest(text, usedCodes) {
+    if (!isAntiEnabled("enableNoise")) return text;
+
+    const chars = getEnabledChars();
+    if (!chars.length) return text;
+
+    let probability = Math.max(0, Math.min(100,
+        Number(document.getElementById("noiseProbability").value) || 0
+    )) / 100;
+
+    // ② 与 ZeroFont 混合拆分联动：只有 ZeroFont “真的会产出伪装词”
+    // （开关打开且概率 > 0）时才下调零宽字符密度，避免“高密度不可见字符
+    // + 伪装词”叠加成异常特征码；概率为 0 时不应白白降低测试强度。
+    if (isAntiEnabled("enableZeroFont") && getZeroFontProbability() > 0) {
+        probability *= 0.55;
+    }
+
+    const maxRepeat = Math.max(1, Math.min(10,
+        Number(document.getElementById("maxRepeat").value) || 1
+    ));
+
+    // 数字/编号保护：例如 5,000、12.5、10,000円、99市場、2026-10-28。
+    // 同时保护数字前后的空白及常见数字标点，避免出现不可见字符堆叠。
+    const raw = String(text);
+    const source = Array.from(raw);
+    const protectedIndex = new Set();
+
+    // 把 UTF-16 下标换算成“码位下标”时，只顺序扫描一遍。
+    // 原实现对每个数字 token 都做一次 slice + Array.from，
+    // 在数字密集的长文本上是 O(n²)，会拖慢批量导出。
+    let utf16Cursor = 0;
+    let codePointCursor = 0;
+
+    for (const match of raw.matchAll(NUMERIC_TOKEN_PATTERN)) {
+
+        while (utf16Cursor < match.index) {
+            const unit = raw.charCodeAt(utf16Cursor);
+            const pair = unit >= 0xD800 && unit <= 0xDBFF &&
+                utf16Cursor + 1 < raw.length;
+            utf16Cursor += pair ? 2 : 1;
+            codePointCursor++;
+        }
+
+        const begin = codePointCursor;
+        const end = begin + Array.from(match[0]).length;
+
+        // 数字 token 自身，以及紧邻 token 的空白/标点，都不插入测试字符。
+        for (let i = Math.max(0, begin - 1); i < Math.min(source.length, end + 1); i++) {
+            protectedIndex.add(i);
+        }
+    }
+
+    const usedCodeSet = new Set(usedCodes || []);
+
+    let result = "";
+    for (let i = 0; i < source.length; i++) {
+        const char = source[i];
+        result += char;
+
+        // 空白处不追加隐藏字符；数字及其边界完全保留原样。
+        if (protectedIndex.has(i) || WHITESPACE_TEST.test(char) || NUMBER_TEST.test(char)) continue;
+
+        // 不在组合附加符号 / 变体选择符 / ZWJ / 肤色修饰符之前插入，
+        // 否则会把一个用户可见字形（如表情、带浊点的假名）拆成两半。
+        if (i + 1 < source.length && isCombiningChar(source[i + 1])) continue;
+
+        if (randomFloat() >= probability) continue;
+
+        const count = rand(1, maxRepeat);
+        for (let j = 0; j < count; j++) {
+            const selected = pick(chars);
+            result += selected.char;
+            if (!usedCodeSet.has(selected.code)) {
+                usedCodeSet.add(selected.code);
+                usedCodes.push(selected.code);
+            }
+        }
+    }
+    return result;
+}
+
+/* =========================================================
+   内容解析
+   ========================================================= */
+
+/* =========================================================
+   HTML 结构随机化引擎
+   ---------------------------------------------------------
+   目标：
+   1. 每次生成重新洗牌；
+   2. 使用合法的 HTML 父子结构；
+   3. class / 属性顺序 / 引号 / CSS 顺序均可变化；
+   4. 不通过故意生成未闭合标签来制造变化；
+   5. before / after 作为 HTML fragment 规范化后再插入，
+      避免后置内容被错误地拼进按钮结构。
+   ========================================================= */
+
+const RANDOM_CLASS_NAMES = [
+    // 常见、自然的 kebab-case 命名
+    "content-area", "info-block", "detail-panel", "main-content",
+    "notice-area", "article-box", "message-body", "summary-block",
+    "content-panel", "detail-area", "notice-block", "summary-box",
+    "action-area", "message-wrap", "info-section", "primary-content",
+    "text-section", "article-content", "notice-content", "detail-content",
+    // 常见 camelCase 命名
+    "contentSection", "messageBody", "summaryBlock", "articlePanel",
+    "noticeContent", "detailSection", "infoPanel", "mainContent",
+    "contentArea", "messageSection", "articleBody", "summaryPanel",
+    // 也保留少量不规则但合法的既有风格
+    "asparagus", "adornedClarendon", "liabilitiesAddict", "unfair-seller",
+    "purple-elephant", "digital-nomad", "vintage-look", "mystic-river",
+    "shadow-walker"
+];
+
+// 每次生成单独维护，避免同一份输出中无意重复分配 class 名。
+let generationClassNames = new Set();
+
+function reserveClassName(preferred) {
+    if (preferred && !generationClassNames.has(preferred)) {
+        generationClassNames.add(preferred);
+        return preferred;
+    }
+
+    const available = RANDOM_CLASS_NAMES.filter(name => !generationClassNames.has(name));
+    if (available.length) {
+        const name = pick(available);
+        generationClassNames.add(name);
+        return name;
+    }
+
+    // 名称池用尽时，继续采用自然的语义命名，不使用统一 x-xxxxx 模式。
+    let index = generationClassNames.size + 1;
+    let candidate = `contentArea${index}`;
+    while (generationClassNames.has(candidate)) {
+        index++;
+        candidate = `contentArea${index}`;
+    }
+    generationClassNames.add(candidate);
+    return candidate;
+}
+
+function shuffleArray(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(randomFloat() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+}
+
+function randomClassName() {
+    const first = reserveClassName(pick(RANDOM_CLASS_NAMES));
+
+    // 少量元素使用双 class；两个名称都保证不重复。
+    if (randomFloat() < 0.24) {
+        const second = reserveClassName(pick(RANDOM_CLASS_NAMES));
+        return `${first} ${second}`;
+    }
+
+    return first;
+}
+
+function randomDynamicClass(prefix) {
+    // prefix 仅用于选择语义相近的名称，不再统一生成 x-xxxxx。
+    const semanticGroups = {
+        content: ["content-area", "contentSection", "main-content", "mainContent", "article-content"],
+        before: ["intro-section", "opening-content", "lead-content", "notice-area", "contentSection"],
+        after: ["closing-section", "footer-content", "summary-block", "summaryBlock", "detail-panel"]
+    };
+    const candidates = semanticGroups[prefix] || RANDOM_CLASS_NAMES;
+    return reserveClassName(pick(candidates));
+}
+
+function randomQuote() {
+    return randomFloat() < 0.5 ? '"' : "'";
+}
+
+function makeAttr(name, value) {
+    const actualName = randomFloat() < 0.5
+        ? name
+        : name.toUpperCase();
+    const quote = randomQuote();
+    return `${actualName}=${quote}${String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;")}${quote}`;
+}
+
+function buildAttributes(attributes) {
+    const list = shuffleArray(attributes);
+    return list.map(item => makeAttr(item[0], item[1])).join(" ");
+}
+
+function buildStyle(declarations) {
+    const list = shuffleArray(declarations.filter(Boolean));
+    return list.join("");
+}
+
+function injectUnicodeOutsideBrackets(text, usedCodes, bracketState = { insideBracket: false }) {
+    // 在整个前置/后置内容遍历期间共享括号状态，因此即使 [] 跨行或跨 HTML 文本节点，也不会在内部插入零宽字符。
+    let output = "";
+    let outside = "";
+
+    const flushOutside = () => {
+        if (outside) {
+            output += injectUnicodeTest(outside, usedCodes);
+            outside = "";
+        }
+    };
+
+    for (const ch of String(text)) {
+        if (ch === "[" && !bracketState.insideBracket) {
+            flushOutside();
+            bracketState.insideBracket = true;
+            output += ch;
+        } else if (ch === "]" && bracketState.insideBracket) {
+            output += ch;
+            bracketState.insideBracket = false;
+        } else if (bracketState.insideBracket) {
+            output += ch;
+        } else {
+            outside += ch;
+        }
+    }
+    flushOutside();
+    return output;
+}
+
+// 粘滞模式：在当前位置匹配一串“字母/数字 + 常见编号/网址符号”。
+// 直接用 lastIndex 定位，避免每次循环都 line.slice(i)（原实现是 O(n²)）。
+const TOKEN_RUN_PATTERN = /[A-Za-z0-9]+(?:[._/@:+%#-][A-Za-z0-9]+)*/y;
+
+function formatReadableLine(line, bracketState, accentColor) {
+    // 拉丁字母、数字、常见编号/网址符号使用清晰的无衬线字体；
+    // [] 内部则原样转义，不套 span，避免打散括号内容。
+    const text = String(line);
+    let html = "";
+    let plain = "";
+
+    // 连续普通文本先累积，最后一次性转义：
+    // 避免每个字符都跑一遍 5 次 replace（长正文下的主要热点）。
+    const flushPlain = () => {
+        if (plain) {
+            html += escapeHtml(plain);
+            plain = "";
+        }
+    };
+
+    let i = 0;
+    while (i < text.length) {
+        const ch = String.fromCodePoint(text.codePointAt(i));
+        const chLength = ch.length;
+
+        if (bracketState.insideBracket) {
+            plain += ch;
+            i += chLength;
+            if (ch === "]") bracketState.insideBracket = false;
+            continue;
+        }
+
+        if (ch === "[") {
+            bracketState.insideBracket = true;
+            plain += ch;
+            i += chLength;
+            continue;
+        }
+
+        TOKEN_RUN_PATTERN.lastIndex = i;
+        const match = TOKEN_RUN_PATTERN.exec(text);
+
+        if (match) {
+            flushPlain();
+            html += `<span style="font-family:Arial,Helvetica,sans-serif;color:${accentColor};font-weight:500;font-variant-numeric:lining-nums tabular-nums;font-feature-settings:'lnum' 1,'tnum' 1;letter-spacing:0;">${escapeHtml(match[0])}</span>`;
+            i += match[0].length;
+            continue;
+        }
+
+        plain += ch;
+        i += chLength;
+    }
+
+    flushPlain();
+    return html;
+}
+
+let generationTheme = null;
+let generationFrameMode = "single";
+
+function normalizeHtmlFragment(rawText) {
+    if (!rawText || !String(rawText).trim()) return "";
+    // 测试内容始终按“用户文字”处理：绝不让 <table>、</div>、<p> 等测试字符串
+    // 被 DOMParser 当成真实标签解析，从根源上避免内容消失或结构被吞掉。
+    return String(rawText).replace(/\r\n?/g, "\n").trim();
+}
+
+function buildBeautifiedParagraphs(rawText, usedCodes) {
+    if (!generationTheme) {
+        generationTheme = pick([
+            {body:"#252f3b",accent:"#294e70",surface:"#ffffff",canvas:"#f4f7fb",border:"#dfe7f0",rule:"#d9e3ed",rail:"#c8d8e8",shadow:"0 3px 12px rgba(31,52,76,.055)"},
+            {body:"#29343d",accent:"#315d78",surface:"#fbfdff",canvas:"#edf3f7",border:"#dce7ed",rule:"#d6e2e9",rail:"#bfd4e0",shadow:"0 2px 10px rgba(39,73,94,.05)"},
+            {body:"#2b3036",accent:"#465d73",surface:"#ffffff",canvas:"#f3f5f7",border:"#e0e5e9",rule:"#e1e6eb",rail:"#cbd5de",shadow:"0 3px 10px rgba(35,43,52,.045)"},
+            {body:"#29352f",accent:"#496657",surface:"#fcfdfb",canvas:"#f0f4ef",border:"#dce6dc",rule:"#dce5dc",rail:"#c7d8c9",shadow:"0 3px 11px rgba(42,73,53,.045)"},
+            {body:"#26363a",accent:"#35656a",surface:"#fbfdfd",canvas:"#eff5f5",border:"#d8e5e5",rule:"#d9e6e6",rail:"#bdd6d6",shadow:"0 3px 11px rgba(35,76,78,.045)"},
+            {body:"#35332f",accent:"#675b4d",surface:"#fffefa",canvas:"#f6f4ef",border:"#e7e1d7",rule:"#e9e3da",rail:"#d9cdbb",shadow:"0 3px 12px rgba(82,69,50,.04)"},
+            {body:"#302f3a",accent:"#625e7b",surface:"#fdfcff",canvas:"#f4f2f8",border:"#e2deed",rule:"#e4e0ee",rail:"#d2cce4",shadow:"0 3px 12px rgba(67,58,98,.045)"},
+            {body:"#29313a",accent:"#3b536a",surface:"#fcfdfe",canvas:"#eff2f5",border:"#dfe5eb",rule:"#e0e6ed",rail:"#c9d4df",shadow:"0 2px 9px rgba(39,55,72,.045)"}
+        ]);
+    }
+    const theme = generationTheme;
+    const paragraphFonts = [
+        "Arial, Helvetica, 'Yu Gothic', Meiryo, sans-serif",
+        "'Yu Gothic', Meiryo, Arial, sans-serif",
+        "'Noto Sans JP', 'Yu Gothic', Meiryo, sans-serif",
+        "Meiryo, 'Yu Gothic', Arial, sans-serif",
+        "'Hiragino Kaku Gothic ProN', Meiryo, sans-serif",
+        "'Yu Mincho', 'Hiragino Mincho ProN', serif"
+    ];
+    const font = pick(paragraphFonts);
+    const normalized = String(rawText).replace(/\r\n?/g, "\n");
+    // 空行分段；段内单换行保留为 <br>，不会把用户的原始层次挤成一行。
+    const paragraphs = normalized.split(/\n[ \t]*\n+/)
+        .map(x => x.trim())
+        .filter(Boolean);
+    if (!paragraphs.length) return "";
+
+    const sizes = shuffleArray(["10.5pt", "11pt", "11.5pt"]);
+    const bracketState = { insideBracket:false };
+    const separators = new Set();
+    const boundaryCount = Math.max(0, paragraphs.length - 1);
+    const separatorCount = boundaryCount === 0 ? 0 : Math.min(
+        boundaryCount,
+        1 + (boundaryCount > 1 && randomFloat() < 0.58 ? 1 : 0)
+    );
+    shuffleArray(Array.from({length:boundaryCount},(_,i)=>i))
+        .slice(0, separatorCount).forEach(i=>separators.add(i));
+
+    const separatorStyles = [
+        () => `<div role="separator" aria-hidden="true" style="height:1px;border-top:1px solid ${theme.rule};margin:11px 2px;line-height:1px;font-size:1px;"></div>`,
+        () => `<div role="separator" aria-hidden="true" style="height:1px;width:46px;background:${theme.rail};margin:12px 0 12px 1px;line-height:1px;font-size:1px;"></div>`,
+        () => `<div role="separator" aria-hidden="true" style="height:1px;background:linear-gradient(90deg,${theme.rail},${theme.rule} 48%,transparent);margin:12px 0;line-height:1px;font-size:1px;"></div>`,
+        () => `<div role="separator" aria-hidden="true" style="height:1px;border-top:1px dotted ${theme.rail};margin:11px 2px;line-height:1px;font-size:1px;"></div>`,
+        () => `<div role="separator" aria-hidden="true" style="margin:11px 0;color:${theme.rail};font-size:9pt;line-height:1;text-align:left;letter-spacing:2px;">· · ·</div>`,
+        () => `<div role="separator" aria-hidden="true" style="height:2px;width:28px;background:${theme.rail};border-radius:2px;margin:12px 0;line-height:1px;font-size:1px;"></div>`
+    ];
+    // 没有分隔符 / 没有重点段时不必提前抽取，避免无意义的随机消耗。
+    const separatorMarkup = separatorCount > 0 ? pick(separatorStyles) : null;
+    const emphasisIndex = paragraphs.length > 1 && randomFloat() < 0.82
+        ? Math.floor(randomFloat() * paragraphs.length) : -1;
+    const paragraphVariants = ["plain","rail","soft","topline","letterpress"];
+    const selectedParagraphVariant = emphasisIndex >= 0
+        ? pick(paragraphVariants) : "plain";
+
+    const blocks = paragraphs.map((paragraph,index)=>{
+        const isEmphasis = index === emphasisIndex;
+        const lines = paragraph.split("\n")
+            .map(line => formatReadableLine(
+                injectUnicodeOutsideBrackets(line, usedCodes, bracketState),
+                bracketState, theme.accent
+            ))
+            .join("<br>\n");
+
+        // 对抗层：ZeroFont 伪装词在所有段落中以设定概率穿插；
+        // 影子指纹只在首段隐写一次，避免同一串 Tag 字符反复出现形成比对特征。
+        const adornedLines = index === 0
+            ? injectAsciiSmuggling(injectZeroFont(lines, 2), 1)
+            : injectZeroFont(lines, 2);
+
+        // ⑥ 多态 DOM 树扰乱：段落文字外围随机嵌套 1–3 层行内标签。
+        const shuffledLines = wrapWithPolymorphicTags(
+            adornedLines,
+            { color: theme.body, depthLimit: 3 }
+        );
+        const size = sizes[index % sizes.length];
+        const weight = isEmphasis ? pick(["500","600"]) : pick(["400","400","500"]);
+        const italic = !isEmphasis && randomFloat() < .025 ? "font-style:italic;" : "";
+        const letterSpacing = pick(["normal","0.003em","0.006em"]);
+        let decoration="", padding="0", margin="0", background="transparent", borderRadius="0";
+        if(isEmphasis && selectedParagraphVariant==="rail"){
+            decoration=`border-left:2px solid ${theme.rail};padding-left:10px;`;
+        }else if(isEmphasis && selectedParagraphVariant==="soft"){
+            background=theme.canvas; padding="8px 10px"; borderRadius="4px";
+        }else if(isEmphasis && selectedParagraphVariant==="topline"){
+            decoration=`border-top:1px solid ${theme.rule};padding-top:7px;`;
+        }else if(isEmphasis && selectedParagraphVariant==="letterpress"){
+            decoration=`border-left:3px solid ${theme.rail};padding-left:9px;`;
+            background=theme.canvas; padding="7px 9px"; borderRadius="2px";
+        }
+        if(isEmphasis && background!=="transparent") margin="0 0 2px 0";
+        else if(index<paragraphs.length-1 && !separators.has(index)) margin="0 0 9px 0";
+        return `<p style="box-sizing:border-box;margin:${margin};padding:${padding};background:${background};border-radius:${borderRadius};font-size:${size};font-family:${font};color:${theme.body};font-weight:${weight};${italic}line-height:1.72;letter-spacing:${letterSpacing};text-align:left;font-variant-numeric:proportional-nums;${decoration}">${shuffledLines}</p>`;
+    });
+    const joined=[];
+    blocks.forEach((block,index)=>{
+        joined.push(block);
+        if(index<blocks.length-1) joined.push(separators.has(index)?separatorMarkup():"");
+    });
+    return joined.join("");
+}
+
+function createContentStructure(rawText, usedCodes, position) {
+    const normalized = normalizeHtmlFragment(rawText);
+    if (!normalized) return "";
+
+    const firstClass = randomClassName();
+    const secondClass = randomClassName();
+    const outerClass = randomDynamicClass(position === "before" ? "before" : "after");
+    const content = buildBeautifiedParagraphs(normalized, usedCodes);
+
+    // 同一封邮件共享统一底色与框架模式；只改变容器层级，不改变段落美化。
+    const theme = generationTheme;
+    const frame = generationFrameMode === "three"
+        ? {padding:"14px 16px",radius:"0",border:"0",shadow:"none",background:theme.surface,outer:`border-top:1px solid ${theme.rail};border-bottom:1px solid ${theme.rail};`}
+        : generationFrameMode === "two"
+            ? {padding:"14px 16px",radius:"6px",border:`1px solid ${theme.border}`,shadow:theme.shadow,background:theme.surface,outer:""}
+            : {padding:"12px 0",radius:"0",border:"0",shadow:"none",background:theme.surface,outer:""};
+    const frameStyle = `box-sizing:border-box;margin:0;padding:${frame.padding};background:${frame.background};border:${frame.border};border-radius:${frame.radius};box-shadow:${frame.shadow};${frame.outer}`;
+
+    const simple = () => `<div ${buildAttributes([["class",outerClass],["data-block",secondClass],["style",frameStyle]])}>${content}</div>`;
+    const nested = () => `<div ${buildAttributes([["class",outerClass],["style",frameStyle]])}><div ${buildAttributes([["class",firstClass],["style","margin:0;padding:0;"]])}>${content}</div></div>`;
+    const section = () => `<section ${buildAttributes([["class",outerClass]])}><div ${buildAttributes([["class",firstClass],["style",frameStyle]])}>${content}</div></section>`;
+    const table = () => `<table ${buildAttributes([["width","100%"],["role","presentation"],["class",outerClass],["style","border-collapse:collapse;"]])}><tbody><tr><td ${buildAttributes([["class",firstClass],["align","left"],["style",`padding:0;${frame.outer}`]])}><div ${buildAttributes([["class",secondClass],["style",frameStyle]])}>${content}</div></td></tr></tbody></table>`;
+    const tableDiv = () => `<table ${buildAttributes([["width","100%"],["role","presentation"],["class",outerClass]])}><tbody><tr><td ${buildAttributes([["align","left"],["class",firstClass],["style","padding:0;"]])}><div ${buildAttributes([["class",secondClass],["style",frameStyle]])}>${content}</div></td></tr></tbody></table>`;
+
+    return pick([simple,nested,section,table,tableDiv])();
+}
+
+function createButtonStructure(targetUrl, buttonText, usedCodes, detachedParams) {
+    // 处理顺序（每一步都不会破坏上一步的产物）：
+    //  ④ 异义字替换（明文阶段）→ Unicode 测试字符（仍为明文）
+    //  → HTML 转义 → ② ZeroFont → ① ASCII 走私 → 换行转 <br>
+    //
+    // 关键：Unicode 测试字符必须在 HTML 转义“之前”插入。
+    // 若先转义再插零宽字符，&amp; / &quot; / &#39; 等实体可能被从中间
+    // 拆开（如 &amp; 变成 &\u200Bamp;），在页面上直接渲染成乱码。
+    // 混淆层其余步骤都只落在“文字间隙”，不会污染属性、实体或结构标签。
+    const normalizedButtonText = String(buttonText).replace(/\r\n?/g, "\n");
+
+    const noisyButtonText = injectUnicodeTest(
+        applyHomoglyphs(normalizedButtonText),
+        usedCodes
+    );
+
+    const escapedButtonText = escapeHtml(noisyButtonText);
+
+    const adornedButtonText = injectAsciiSmuggling(
+        injectZeroFont(escapedButtonText, 2),
+        2
+    );
+
+    // 这样多行按钮文字会真正分行显示，而不是被 HTML 折叠成普通空格。
+    // ⑥ 多态 DOM 树扰乱：按钮文字外围再嵌套一层随机行内标签。
+    const processedButtonText = wrapWithPolymorphicTags(
+        adornedButtonText.replace(/\n/g, "<br>\n"),
+        { color: "#ffffff", depthLimit: 3 }
+    );
+
+    const fonts = [
+        "Arial, Helvetica, 'Yu Gothic', Meiryo, sans-serif",
+        "'Yu Gothic', Meiryo, Arial, sans-serif",
+        "'Noto Sans JP', 'Yu Gothic', Meiryo, sans-serif",
+        "Meiryo, 'Yu Gothic', Arial, sans-serif"
+    ];
+
+    const colors = [
+        "#3B57DF",
+        "#1F5BBE",
+        "rgb(67,133,224)",
+        "rgb(63,127,224)",
+        "#236CDA",
+        "#1e4bb0",
+        "#2866d3"
+    ];
+
+    const bg = pick(colors);
+    const font = pick(fonts);
+    const radius = pick(["0px", "4px", "6px", "8px"]);
+
+    const sizeStyles = [
+        [
+            "display:block;",
+            "text-decoration:none;",
+            "text-align:center;",
+            "font-size:11.5pt;",
+            "line-height:1.45;",
+            "padding:12px 24px;",
+            "box-sizing:border-box;"
+        ],
+        [
+            "padding:13px 26px;",
+            "font-size:12pt;",
+            "line-height:1.45;",
+            "display:block;",
+            "box-sizing:border-box;",
+            "text-align:center;",
+            "text-decoration:none;"
+        ],
+        [
+            "padding:12px 20px;",
+            "font-size:12pt;",
+            "line-height:1.45;",
+            "display:block;",
+            "text-align:center;",
+            "text-decoration:none;",
+            "box-sizing:border-box;"
+        ],
+        [
+            "width:100%;",
+            "padding:12px 0;",
+            "font-size:11.5pt;",
+            "line-height:1.45;",
+            "display:block;",
+            "text-align:center;",
+            "text-decoration:none;",
+            "box-sizing:border-box;"
+        ]
+    ];
+
+    const buttonStyle = buildStyle([
+        `background-color:${bg};`,
+        "color:#fff;",
+        "font-weight:700;",
+        "letter-spacing:0.01em;",
+        "font-variant-numeric:lining-nums tabular-nums;",
+        "font-feature-settings:'lnum' 1,'tnum' 1;",
+        "text-shadow:0 1px 1px rgba(0,0,0,0.16);",
+        "border:none;",
+        `border-radius:${radius};`,
+        `font-family:${font};`,
+        ...pick(sizeStyles),
+        // ③ 多层网格降级：安卓端与 Gmail App 下防止文字溢出、字号被自动放大。
+        ...(isAntiEnabled("enableTableGrid") ? [
+            // 表格单元格会收缩到内容宽度，这里显式满宽以保持原有满宽按钮观感。
+            "width:100%;",
+            "overflow-wrap:anywhere;",
+            "word-break:break-word;",
+            "-webkit-text-size-adjust:none;",
+            "text-size-adjust:none;"
+        ] : [])
+    ]);
+
+    const anchorClass = randomClassName();
+    const wrapperClass = randomClassName();
+    const dynamicClass = randomDynamicClass("action");
+
+    // ③ 隐蔽无障碍补偿：用自然日文 aria-label 抹除混淆字符在系统
+    // 无障碍 / 盲道审计（TalkBack、VoiceOver）中产生的恶意指纹。
+    const anchorAttributes = [
+        ["href", targetUrl],
+        ["class", anchorClass],
+        ["style", buttonStyle],
+        ["data-action", dynamicClass]
+    ];
+
+    // 分离式链接指纹：href 保持原样（如 %{AUTOVALS1}），
+    // 把时效指纹写入 data-* 属性，既能保证原链接可正常打开，
+    // 又能在源码层面保证每条记录唯一。
+    if (detachedParams) {
+        anchorAttributes.push(["data-sig", detachedParams.signature]);
+        anchorAttributes.push(["data-ts", detachedParams.timeToken]);
+        anchorAttributes.push(["data-verify", detachedParams.verify]);
+    }
+
+    if (isAntiEnabled("enableTableGrid")) {
+        anchorAttributes.push(["aria-label", "詳細の確認"]);
+    }
+
+    const anchor = `<a ${buildAttributes(anchorAttributes)}>${processedButtonText}</a>`;
+
+    // ⑥ 表格骨架层的多态包装：只用 span / font，并以 display:block
+    // 保持单元格满宽行为，避免包裹块级 <a> 时产生匿名块。
+    // 只有启用网格降级时才真正构建骨架包装；
+    // 关闭时不再做一次无用的 wrapWithSkeletonTags 调用与随机消耗。
+    const buildGridAnchor = () => wrapWithSkeletonTags(anchor);
+
+    const makeDiv = () => {
+        return `<div ${buildAttributes([
+            ["class", wrapperClass],
+            ["style", "margin:6px;padding:3px;"]
+        ])}>${anchor}</div>`;
+    };
+
+    const makeP = () => {
+        return `<p ${buildAttributes([
+            ["class", wrapperClass],
+            ["style", "margin:12px 0;padding:0;"]
+        ])}>${anchor}</p>`;
+    };
+
+    const makeSectionDiv = () => {
+        return `<section ${buildAttributes([
+            ["class", wrapperClass]
+        ])}><div ${buildAttributes([
+            ["class", randomClassName()],
+            ["style", "margin:6px 0;padding:0;"]
+        ])}>${anchor}</div></section>`;
+    };
+
+    const makeTable = () => {
+        return `<table ${buildAttributes([
+            ["width", "100%"],
+            ["role", "presentation"],
+            ["class", wrapperClass],
+            ["style", "border-collapse:collapse;"]
+        ])}><tbody><tr><td ${buildAttributes([
+            ["class", randomClassName()],
+            ["align", "center"],
+            ["style", "padding:0;"]
+        ])}>${anchor}</td></tr></tbody></table>`;
+    };
+
+    const makeTableNested = () => {
+        return `<table ${buildAttributes([
+            ["width", "100%"],
+            ["role", "presentation"],
+            ["class", wrapperClass]
+        ])}><tbody><tr><td ${buildAttributes([
+            ["align", "center"],
+            ["class", randomClassName()],
+            ["style", "padding:0;"]
+        ])}><div ${buildAttributes([
+            ["class", randomClassName()],
+            ["style", "margin:0;padding:0;"]
+        ])}>${anchor}</div></td></tr></tbody></table>`;
+    };
+
+    /* ---------------------------------------------
+       ③ 图像网格化多层降级骨架
+       ---------------------------------------------
+       完全放弃 div / 行内链接骨架，改用邮件客户端（Outlook、
+       Gmail App、Android WebView、企业网关渲染器）都能正确
+       还原的 table > tbody > tr > td[align=center] 结构。
+       多层嵌套用于背景色丢失时的降级回退。
+       --------------------------------------------- */
+
+    const gridTableAttributes = [
+        ["role", "presentation"],
+        ["border", "0"],
+        ["cellpadding", "0"],
+        ["cellspacing", "0"],
+        ["width", "100%"]
+    ];
+
+    const gridTableStyle = "border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;";
+
+    const gridCellStyle = "padding:0;text-align:center;-webkit-text-size-adjust:none;text-size-adjust:none;";
+
+    const makeGridTable = () => {
+        return `<table ${buildAttributes([
+            ...gridTableAttributes,
+            ["class", wrapperClass],
+            ["style", gridTableStyle]
+        ])}><tbody><tr><td ${buildAttributes([
+            ["align", "center"],
+            ["valign", "middle"],
+            ["class", randomClassName()],
+            ["style", gridCellStyle]
+        ])}>${buildGridAnchor()}</td></tr></tbody></table>`;
+    };
+
+    const makeGridNestedTable = () => {
+        return `<table ${buildAttributes([
+            ...gridTableAttributes,
+            ["class", wrapperClass],
+            ["style", gridTableStyle]
+        ])}><tbody><tr><td ${buildAttributes([
+            ["align", "center"],
+            ["valign", "middle"],
+            ["class", randomClassName()],
+            ["style", gridCellStyle]
+        ])}><table ${buildAttributes([
+            ["role", "presentation"],
+            ["border", "0"],
+            ["cellpadding", "0"],
+            ["cellspacing", "0"],
+            ["width", "100%"],
+            ["class", randomClassName()],
+            ["style", gridTableStyle]
+        ])}><tbody><tr><td ${buildAttributes([
+            ["align", "center"],
+            ["valign", "middle"],
+            ["style", gridCellStyle]
+        ])}>${buildGridAnchor()}</td></tr></tbody></table></td></tr></tbody></table>`;
+    };
+
+    const makeGridTripleTable = () => {
+        return `<table ${buildAttributes([
+            ...gridTableAttributes,
+            ["class", wrapperClass],
+            ["style", gridTableStyle]
+        ])}><tbody><tr><td ${buildAttributes([
+            ["align", "center"],
+            ["style", gridCellStyle]
+        ])}><table ${buildAttributes([
+            ["role", "presentation"],
+            ["border", "0"],
+            ["cellpadding", "0"],
+            ["cellspacing", "0"],
+            ["width", "100%"],
+            ["style", gridTableStyle]
+        ])}><tbody><tr><td ${buildAttributes([
+            ["align", "center"],
+            ["class", randomClassName()],
+            ["style", gridCellStyle]
+        ])}><table ${buildAttributes([
+            ["role", "presentation"],
+            ["border", "0"],
+            ["cellpadding", "0"],
+            ["cellspacing", "0"],
+            ["width", "100%"],
+            ["style", gridTableStyle]
+        ])}><tbody><tr><td ${buildAttributes([
+            ["align", "center"],
+            ["valign", "middle"],
+            ["style", gridCellStyle]
+        ])}>${buildGridAnchor()}</td></tr></tbody></table></td></tr></tbody></table></td></tr></tbody></table>`;
+    };
+
+    const makeGridConditionalTable = () => {
+        // Outlook（mso）专用条件注释降级层：非 Outlook 客户端整段忽略。
+        return `<!--[if mso]><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center"><![endif]-->` +
+            `<table ${buildAttributes([
+                ...gridTableAttributes,
+                ["class", wrapperClass],
+                ["style", gridTableStyle]
+            ])}><tbody><tr><td ${buildAttributes([
+                ["align", "center"],
+                ["valign", "middle"],
+                ["class", randomClassName()],
+                ["style", gridCellStyle]
+            ])}>${buildGridAnchor()}</td></tr></tbody></table>` +
+            `<!--[if mso]></td></tr></table><![endif]-->`;
+    };
+
+    const makeGridCelledTable = () => {
+        // td 显式 width=100% 的降级变体：部分老版本 Gmail App 会先
+        // 依据单元格宽度布局，再应用内联样式。
+        return `<table ${buildAttributes([
+            ...gridTableAttributes,
+            ["class", wrapperClass],
+            ["style", gridTableStyle]
+        ])}><tbody><tr><td ${buildAttributes([
+            ["align", "center"],
+            ["valign", "middle"],
+            ["width", "100%"],
+            ["class", randomClassName()],
+            ["style", gridCellStyle]
+        ])}><table ${buildAttributes([
+            ["role", "presentation"],
+            ["border", "0"],
+            ["cellpadding", "0"],
+            ["cellspacing", "0"],
+            ["width", "100%"],
+            ["style", gridTableStyle + "margin:0 auto;"],
+            ["align", "center"]
+        ])}><tbody><tr><td ${buildAttributes([
+            ["align", "center"],
+            ["valign", "middle"],
+            ["style", gridCellStyle]
+        ])}>${buildGridAnchor()}</td></tr></tbody></table></td></tr></tbody></table>`;
+    };
+
+    if (isAntiEnabled("enableTableGrid")) {
+        return pick([
+            makeGridTable,
+            makeGridNestedTable,
+            makeGridTripleTable,
+            makeGridConditionalTable,
+            makeGridCelledTable
+        ])();
+    }
+
+    // 未启用多层网格降级时，完整保留原有五种外部包裹骨架。
+    return pick([
+        makeDiv,
+        makeP,
+        makeSectionDiv,
+        makeTable,
+        makeTableNested
+    ])();
+}
+
+/* =========================================================
+   单个 HTML 生成器
+   ========================================================= */
+
+// 标题假名字符集：内容固定，提升到模块级，避免每条记录重复 Array.from。
+const HIRAGANA_CHARS = Array.from("あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをんがぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽぁぃぅぇぉゃゅょっー");
+const KATAKANA_CHARS = Array.from("アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポァィゥェォャュョッー");
+
+function generateTemplate() {
+    const beforeRaw =
+        document.getElementById("beforeContent").value;
+
+    const afterRaw =
+        document.getElementById("afterContent").value;
+
+    let targetUrl =
+        document.getElementById("targetUrl").value.trim();
+
+    // 不 trim 整段文本，以保留用户输入的多行排版；仅用 trim 判断是否为空。
+    let btnText =
+        document.getElementById("buttonText").value;
+
+    if (!targetUrl) {
+        targetUrl = "%{AUTOVALS1}";
+    }
+
+    // ⑦ 时效性动态指纹链接：每封邮件一个唯一的路由指纹。
+    // 智能 / 哈希模式把指纹写入 # 片段：占位符保持完整、链接可正常打开，
+    // 同时每条 href 字符串唯一；仅“分离式”会把指纹写入 data-* 属性。
+    const linkDetached =
+        isAntiEnabled("enableLinkMutation") &&
+        isLinkFingerprintDetached();
+    const linkDetachedParams = linkDetached
+        ? buildTimeFusedParams()
+        : null;
+    targetUrl = buildTimeFusedUrl(targetUrl);
+
+    if (!btnText.trim()) {
+        btnText = "■ご利用明細を確認";
+    }
+
+    const usedCodes = [];
+    // 每次合成重置 class 登记表，确保本次输出的命名检查相互独立。
+    generationClassNames = new Set();
+    // 每封邮件只抽取一次配色与整体框架模式，前置/后置共享，确保底色统一。
+    generationTheme = null;
+    generationFrameMode = pick(["single", "two", "three"]);
+
+    // ① 影子指纹：同一封邮件内保持一致，每封重新抽取（跨邮件不可关联）。
+    generationShadowPayload = buildShadowFingerprint();
+    generationSmuggleCursor = 0;
+    generationSmuggleChars = null;
+
+    // HTML 噪点模块（模式 B）会往这里注册隐藏类规则，
+    // 必须在构建 <head> 之前清空，避免把上一封邮件的规则带进来。
+    generationHeadCssRules = [];
+
+    // ⑥ 每次生成重置多态 class 登记表，避免同一份输出重复 token。
+    generationDomTokens = new Set();
+
+    // HTML 最大宽度支持固定值（560）或范围（500-560）；每封生成结果只抽取一次宽度。
+    const widthText = String(document.getElementById("maxWidth").value || "500-560").trim();
+    const widthMatch = widthText.match(/^(\d{1,4})(?:\s*[-~至到]\s*(\d{1,4}))?$/);
+    let widthMin = 500, widthMax = 560;
+    if (widthMatch) {
+        widthMin = Math.max(300, Math.min(1000, Number(widthMatch[1])));
+        widthMax = widthMatch[2] ? Math.max(300, Math.min(1000, Number(widthMatch[2]))) : widthMin;
+        if (widthMin > widthMax) [widthMin, widthMax] = [widthMax, widthMin];
+    }
+    const maxWidth = rand(widthMin, widthMax);
+
+    /* -----------------------------------------
+       前置内容：独立随机结构
+       ----------------------------------------- */
+    const before = createContentStructure(
+        beforeRaw,
+        usedCodes,
+        "before"
+    );
+
+    /* -----------------------------------------
+       后置内容：独立随机结构
+       ----------------------------------------- */
+    const after = createContentStructure(
+        afterRaw,
+        usedCodes,
+        "after"
+    );
+
+    /* -----------------------------------------
+       ⑤ 贝叶斯语义毒化：影子上下文
+       白词句子在此一次性抽取并切分，
+       随后分散注入到按钮前后与正文末尾。
+       ----------------------------------------- */
+    const bayesian = generateBayesianNoise();
+
+    const bayesianParts =
+        bayesian.parts || [];
+
+    /* -----------------------------------------
+       页面级随机参数
+       ----------------------------------------- */
+    const fonts = [
+        "Arial, sans-serif",
+        "'Yu Gothic', sans-serif",
+        "'Noto Sans JP', sans-serif",
+        "Meiryo, sans-serif",
+        "'MS PGothic', sans-serif"
+    ];
+
+    // 页面基准字号固定在 11pt；正文段落使用 10.5–11.5pt 的窄区间，最大差距不超过 1pt。
+    const font = pick(fonts);
+    const fontSize = "11pt";
+
+    const bodyStyle = buildStyle([
+        `font-size:${fontSize};`,
+        `font-family:${font};`,
+        "margin:0;",
+        "padding:10px;",
+        `background:${generationTheme ? generationTheme.surface : "#fff"};`
+    ]);
+
+    const outerClass = randomDynamicClass("content");
+    const outerClass2 = randomClassName();
+
+    /* -----------------------------------------
+       完整 HTML 文档：整合文档头随机生成器核心
+       始终输出单一 HTML5 + UTF-8 文档，避免声明与实际编码不一致。
+       ----------------------------------------- */
+    // lang 属性表达方式做安全变化；不混入与实际字节编码不一致的声明。
+    const langValue = pick(["ja", "ja-JP", "ja-Jpan", "ja-Jpan-JP"]);
+    const langAttrName = pick(["lang", "lang", "LANG"]);
+    const langQuote = randomFloat() < 0.5 ? '"' : "'";
+    const langMarkup = langAttrName + (randomFloat() < 0.5 ? "=" : " = ") + langQuote + langValue + langQuote;
+
+    // 标题不再使用固定日语句子，而是按字符随机混合平假名与片假名。
+    // 字符实体选项仍然有效，实体只改变源码写法，不改变显示字符。
+    const kanaLength = 8 + Math.floor(randomFloat() * 17);
+    const titleRaw = Array.from({length:kanaLength}, () => pick(randomFloat() < 0.5 ? HIRAGANA_CHARS : KATAKANA_CHARS)).join("");
+    const titleText = Array.from(titleRaw).map(ch => randomFloat() < 0.22 ? `&#${ch.codePointAt(0)};` : ch).join("");
+
+    const metaPool = [
+        ["name", "viewport", "content", "width=device-width,initial-scale=1"],
+        ["name", "format-detection", "content", "telephone=no,address=no,email=no,date=no"],
+        ["name", "color-scheme", "content", "light dark"],
+        ["name", "supported-color-schemes", "content", "light dark"],
+        ["name", "referrer", "content", "origin"],
+        ["name", "robots", "content", "noindex,nofollow"],
+        ["name", "x-apple-disable-message-reformatting", "content", "true"]
+    ];
+    const density = document.getElementById("headMetaDensity").value;
+    const metaCount = density === "light" ? 1 : density === "rich" ? metaPool.length : 3;
+    const selectedMeta = shuffleArray(metaPool).slice(0, metaCount);
+    const metaMarkup = selectedMeta.map(([a, av, b, bv]) => {
+        const attrs = randomFloat() < 0.5
+            ? buildAttributes([[a, av], [b, bv]])
+            : buildAttributes([[b, bv], [a, av]]);
+        return `<meta ${attrs}>`;
+    });
+    if (randomFloat() < 0.65) {
+        metaMarkup.push(`<meta ${buildAttributes([["http-equiv", "X-UA-Compatible"], ["content", "IE=edge"]])}>`);
+    }
+
+    // 头部 CSS 作为补充样式，不覆盖前后内容统一左对齐的规则。
+    const headCssMode = document.getElementById("headCssMode").value;
+    const actualHeadCssMode = headCssMode === "random"
+        ? pick(["minimal", "button", "text"]) : headCssMode;
+    const headCssFont = pick(["Arial, sans-serif", "Meiryo, sans-serif", "'Yu Gothic', sans-serif", "'MS PGothic', sans-serif"]);
+    // outerClass2 可能带两个 class（“a b”），直接拼进选择器会变成
+    // 后代选择器 `.a b`，规则静默失效。CSS 只取第一个 token。
+    const outerCssToken =
+        String(outerClass2).split(/\s+/)[0];
+
+    const headCssRules = [
+        `.${outerClass} { max-width:${maxWidth}px; width:100%; }`,
+        `.${outerCssToken} { margin:0; padding:0; }`
+    ];
+    if (actualHeadCssMode === "button") {
+        headCssRules.push(`a { overflow-wrap:anywhere; }`);
+    } else if (actualHeadCssMode === "text") {
+        headCssRules.push(`body { line-height:${pick([1.5, 1.6, 1.7, 1.8])}; }`);
+    } else {
+        headCssRules.push(`body { font-family:${headCssFont}; }`);
+    }
+
+    // 贝叶斯 HTML 噪点模块（模式 B）动态注册的隐藏类规则。
+    generationHeadCssRules.forEach(rule => headCssRules.push(rule));
+
+    const titleMarkup = `<title>${titleText}</title>`;
+    const styleMarkup = `<style type="text/css">\n${headCssRules.join("\n")}\n</style>`;
+    // 字符编码声明采用多种等价写法，但始终与实际下载文件的 UTF-8 编码一致。
+    // 不输出 EUC-JP / Shift_JIS 声明，除非文件本身真的按对应编码写出。
+    const charsetVariants = [
+        '<meta charset="UTF-8">',
+        '<meta charset=utf-8>',
+        '<meta charset = "utf-8">',
+        '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">',
+        '<meta content="text/html; charset=utf-8" http-equiv="Content-Type">'
+    ];
+    const charsetItem = pick(charsetVariants);
+    const headItems = [
+        ...metaMarkup,
+        titleMarkup,
+        styleMarkup
+    ];
+    // 编码声明固定在 head 前部；其余项目可随机排序。
+    const shuffledHeadItems = shuffleArray(headItems);
+
+    // 文档类型声明随机化：保留现代 HTML5，并加入常见历史 HTML 4.01 / XHTML 声明。
+    // 注意：本工具最终以 text/html 的 HTML 解析器规范化文档；选择 XHTML DOCTYPE
+    // 只代表测试声明变化，不代表输出会自动成为严格 XML/XHTML 文档。
+    const doctypeVariants = [
+        '<!DOCTYPE html>',
+        '<!DOCTYPE HTML>',
+        '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">',
+        '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">',
+        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">',
+        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">',
+        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">'
+    ];
+    const selectedDoctype = pick(doctypeVariants);
+
+    let html = `${selectedDoctype}
+<html ${langMarkup}>
+<head>
+${charsetItem}
+${shuffledHeadItems.join("\n")}
+</head>
+<body ${makeAttr("style", bodyStyle)}>
+<div ${buildAttributes([
+        ["class", outerClass],
+        ["style", `max-width:${maxWidth}px;width:100%;`],
+        ["data-container", outerClass2]
+    ])}>
+${before ? before + "\n" : ""}
+${bayesianParts[0] ? bayesianParts[0] + "\n" : ""}
+
+${createButtonStructure(targetUrl, btnText, usedCodes, linkDetachedParams)}
+
+${bayesianParts[1] ? bayesianParts[1] + "\n" : ""}
+${after ? after + "\n" : ""}
+${bayesianParts[2] ? bayesianParts[2] + "\n" : ""}
+</div>
+
+<br><br>
+
+</body>
+</html>`;
+
+    // 不再使用 DOMParser 重新整理正文：用户输入可能包含“</table>”等测试字符串，
+    // 重新解析会把它们误认为 HTML 标签。生成器本身已经保证所有结构模板闭合。
+    // 仅压缩标签之间的结构性换行，不改写正文文本、换行和段落内容。
+    html = html.replace(/>[ \t]*\r?\n[ \t]*</g, "><");
+
+    return {
+        html: html,
+        usedCodes: Array.from(new Set(usedCodes)),
+        antiDetection: {
+            smuggle: isAntiEnabled("enableAsciiSmuggle"),
+            zeroFont: isAntiEnabled("enableZeroFont"),
+            tableGrid: isAntiEnabled("enableTableGrid"),
+            homoglyph: isAntiEnabled("enableHomoglyph"),
+            bayesian: isAntiEnabled("enableBayesian"),
+            bayesianHtmlNoise: isAntiEnabled("enableBayesianHtmlNoise"),
+            bayesianCount: bayesian.count || 0,
+            bayesianBlocks: bayesianParts.length,
+            domShuffle: isAntiEnabled("enableDomShuffle"),
+            linkMutation: isAntiEnabled("enableLinkMutation"),
+            linkDetached: linkDetached,
+            linkDetachedSample: linkDetachedParams
+                ? "data-sig=" + linkDetachedParams.signature + "&data-ts=" + linkDetachedParams.timeToken
+                : "",
+            linkSample: targetUrl,
+            fingerprint: generationShadowPayload || ""
+        }
+    };
+}
+
+
+/* =========================================================
+   单次生成
+   ========================================================= */
+
+function synthesizeTemplate() {
+
+    setRandomSeed(document.getElementById("randomSeed")?.value || "");
+    const start =
+        performance.now();
+
+
+    try {
+
+        const result =
+            generateTemplate();
+
+
+        const output =
+            result.html;
+
+
+        document.getElementById(
+            "codeOutput"
+        ).value =
+            output;
+
+
+        document.getElementById(
+            "previewIframe"
+        ).srcdoc =
+            output;
+
+
+        const elapsed =
+            performance.now() -
+            start;
+
+
+        document.getElementById(
+            "statChars"
+        ).textContent =
+            result.usedCodes.length;
+
+
+        document.getElementById(
+            "statLength"
+        ).textContent =
+            output.length;
+
+
+        document.getElementById(
+            "statBytes"
+        ).textContent =
+            formatBytes(
+                new Blob([output]).size
+            );
+
+
+        document.getElementById(
+            "statTime"
+        ).textContent =
+            elapsed.toFixed(3) +
+            " ms";
+
+
+        document.getElementById(
+            "statBenchmark"
+        ).textContent =
+            elapsed > 0
+                ? (output.length / elapsed).toFixed(0) +
+                  " ch/ms"
+                : "--";
+
+
+
+        writeLog(
+            result,
+            output,
+            elapsed
+        );
+
+    } catch (error) {
+
+        writeLogError(error);
+
+        console.error(error);
+    }
+}
+
+
+/* =========================================================
+   批量生成
+   ========================================================= */
+
+// 浏览器内存与单文件体积的实际上限。
+const MAX_BATCH_COUNT = 50000;
+
+// 超过这个数量时先确认：单文件过大可能让浏览器卡死或崩溃。
+const BATCH_CONFIRM_THRESHOLD = 20000;
+
+async function batchGenerateAndExport() {
+
+    setRandomSeed(document.getElementById("randomSeed")?.value || "");
+    const countInput =
+        document.getElementById("exportCount");
+
+    let count =
+        parseInt(countInput.value, 10);
+
+    if (!Number.isFinite(count) || count < 1) {
+        alert("请输入大于 0 的生成数量。");
+        countInput.focus();
+        return;
+    }
+
+    // input 的 max 属性只是前端提示，手输 999999 仍能绕过，必须再夹一次。
+    if (count > MAX_BATCH_COUNT) {
+
+        count = MAX_BATCH_COUNT;
+        countInput.value = String(MAX_BATCH_COUNT);
+
+        writeSimpleLog(
+            "生成数量已限制为上限 " + MAX_BATCH_COUNT + " 条。"
+        );
+    }
+
+    if (count > BATCH_CONFIRM_THRESHOLD && !confirm(
+        "即将生成 " + count + " 条记录。\n" +
+        "单文件可能达到数百 MB，浏览器可能卡顿甚至内存不足。\n\n" +
+        "确定继续吗？"
+    )) {
+        return;
+    }
+
+    const button = document.getElementById("exportButton");
+    const progressWrap = document.getElementById("progressWrap");
+    const progressBar = document.getElementById("progressBar");
+    const progressText = document.getElementById("progressText");
+
+    button.disabled = true;
+    progressWrap.style.display = "block";
+    progressBar.style.width = "0%";
+
+    const startAll = performance.now();
+    const outputParts = ["\uFEFF"];
+    let totalBytes = 0;
+    let totalChars = 0;
+    let totalBayesian = 0;
+
+    try {
+        for (let i = 1; i <= count; i++) {
+            const result = generateTemplate();
+            const html = result.html.trimEnd();
+
+            /*
+             * 输出格式与 contentlist.txt 保持一致：
+             * True
+             * 1
+             * ------------------LINE-----------------
+             * [完整 HTML]
+             * ------------------CONTENTLINE-----------------
+             *
+             * 所有记录连续写入同一个 contentlist.txt，
+             * 不再将每条记录拆成独立 HTML 文件。
+             */
+            // 末尾必须有换行：否则下一条记录的 "True" 会直接拼在
+            // CONTENTLINE 分隔线后面（…CONTENTLINE-----------------True）。
+            outputParts.push(
+                "True\n1\n" +
+                "------------------LINE-----------------\n" +
+                html +
+                "\n------------------CONTENTLINE-----------------\n"
+            );
+
+            totalBytes += utf8ByteLength(html);
+            totalChars += html.length;
+
+            if (result.antiDetection) {
+                totalBayesian += result.antiDetection.bayesianCount || 0;
+            }
+
+            const percent = Math.round(i / count * 100);
+            progressBar.style.width = percent + "%";
+            progressText.textContent =
+                `正在生成并合并：${i} / ${count}（${percent}%）`;
+
+            if (i % 25 === 0) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+        }
+
+        const combinedText = outputParts.join("").replace(/\r?\n/g, "\r\n");
+        const elapsedAll = performance.now() - startAll;
+        const blob = new Blob(
+            [combinedText],
+            { type: "text/plain;charset=utf-8" }
+        );
+
+        downloadBlob(blob, "contentlist.txt");
+
+        progressBar.style.width = "100%";
+        progressText.textContent =
+            `完成：已将 ${count} 条 HTML 连续写入 contentlist.txt。`;
+
+        const reportLines = [
+            "批量生成完成",
+            "",
+            "输出文件：contentlist.txt",
+            "生成数量：" + count,
+            "对抗层：" + describeAntiStatus(),
+            "链接指纹注入：" + describeLinkMutationMode(),
+            "Unicode 字符插入概率：" + Math.round(getNoiseProbabilityRatio() * 100) + "%",
+            "同形异义替换概率：" + Math.round(getConfusionProbability() * 100) + "%",
+            "ZeroFont 穿插概率：" + Math.round(getZeroFontProbability() * 100) + "%",
+            "贝叶斯毒化总句数：" + totalBayesian,
+            "毒化密度设置：" + String(document.getElementById("bayesianDensity").value || ""),
+            "HTML 总字符数：" + totalChars,
+            "HTML 总大小：" + formatBytes(totalBytes),
+            "合并文档大小：" + formatBytes(blob.size),
+            "耗时：" + elapsedAll.toFixed(3) + " ms",
+            "",
+            "所有记录均写入同一个文档，格式为：",
+            "True",
+            "1",
+            "------------------LINE-----------------",
+            "[完整 HTML 内容]",
+            "------------------CONTENTLINE-----------------",
+            "",
+            "已自动下载 contentlist.txt。"
+        ];
+
+        writeSimpleLog(reportLines.join("\n"));
+
+    } catch (error) {
+        progressText.textContent = "生成失败：" + error.message;
+        writeLogError(error);
+        console.error(error);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+
+/* =========================================================
+   下载
+   ========================================================= */
+
+function downloadBlob(
+    blob,
+    filename
+) {
+
+    const url =
+        URL.createObjectURL(
+            blob
+        );
+
+
+    const a =
+        document.createElement(
+            "a"
+        );
+
+
+    a.href =
+        url;
+
+    a.download =
+        filename;
+
+    document.body.appendChild(a);
+
+    a.click();
+
+    a.remove();
+
+
+    setTimeout(
+        () => URL.revokeObjectURL(url),
+        3000
+    );
+}
+
+
+
+
+/* =========================================================
+   日志
+   ========================================================= */
+
+function writeLog(
+    result,
+    output,
+    elapsed
+) {
+
+    const log =
+        document.getElementById(
+            "log"
+        );
+
+
+    const lines = [];
+
+
+    lines.push(
+        "========================================"
+    );
+
+
+    lines.push(
+        "Unicode HTML 鲁棒性测试"
+    );
+
+
+    lines.push(
+        "========================================"
+    );
+
+
+    lines.push(
+        "生成时间：" +
+        new Date().toLocaleString()
+    );
+
+
+    lines.push(
+        "本次生成耗时：" +
+        elapsed.toFixed(3) +
+        " ms"
+    );
+
+
+    lines.push(
+        "HTML 字符长度：" +
+        output.length
+    );
+
+
+    lines.push(
+        "HTML UTF-8 大小：" +
+        formatBytes(
+            new Blob([
+                output
+            ]).size
+        )
+    );
+
+
+    lines.push(
+        "本次实际使用字符：" +
+        result.usedCodes.length
+    );
+
+
+    if (result.antiDetection) {
+
+        const anti = result.antiDetection;
+
+        lines.push("");
+
+        lines.push("对抗层状态：");
+
+        lines.push("  ASCII走私：" + (anti.smuggle ? "开" : "关"));
+        lines.push("  动态ZeroFont：" + (anti.zeroFont ? "开" : "关"));
+        lines.push("  多层网格降级：" + (anti.tableGrid ? "开" : "关"));
+        lines.push("  日本敏感词异义替换：" + (anti.homoglyph ? "开" : "关"));
+
+        if (anti.bayesian !== undefined) {
+            lines.push(
+                "  贝叶斯语义毒化：" +
+                (anti.bayesian
+                    ? "开（" + anti.bayesianCount + " 句 / " + anti.bayesianBlocks + " 块）"
+                    : "关")
+            );
+        }
+
+        if (anti.bayesianHtmlNoise !== undefined) {
+            lines.push(
+                "  贝叶斯HTML噪点：" +
+                (anti.bayesian && anti.bayesianHtmlNoise ? "开" : "关")
+            );
+        }
+
+        if (anti.domShuffle !== undefined) {
+            lines.push("  多态DOM树扰乱：" + (anti.domShuffle ? "开" : "关"));
+        }
+
+        if (anti.linkMutation !== undefined) {
+            lines.push("  时效性动态指纹链接：" + (anti.linkMutation ? "开" : "关"));
+
+            if (anti.linkMutation && anti.linkDetached) {
+                lines.push("  注入方式：分离式（href 不改动，指纹写入 data-* 属性）");
+                lines.push("  链接地址：" + anti.linkSample);
+                if (anti.linkDetachedSample) {
+                    lines.push("  分离指纹：" + anti.linkDetachedSample);
+                }
+            } else if (anti.linkMutation && anti.linkSample) {
+                lines.push("  链接指纹：" + anti.linkSample);
+            }
+        }
+
+        if (anti.fingerprint) {
+            lines.push(
+                "  影子指纹（Unicode Tag 隐写）：" +
+                anti.fingerprint
+            );
+        }
+    }
+
+
+    lines.push("");
+
+
+    if (
+        result.usedCodes.length === 0
+    ) {
+
+        lines.push(
+            "本次没有插入 Unicode 测试字符。"
+        );
+
+    } else {
+
+        lines.push(
+            "本次使用的 Unicode："
+        );
+
+
+        result.usedCodes.forEach(
+            code => {
+
+                lines.push(
+                    "  " + code
+                );
+            }
+        );
+    }
+
+
+    lines.push("");
+
+
+    lines.push(
+        "说明：本工具用于 Unicode / HTML / DOM " +
+        "渲染鲁棒性测试。"
+    );
+
+
+    log.textContent =
+        lines.join("\n");
+}
+
+
+function writeLogError(error) {
+
+    document.getElementById(
+        "log"
+    ).textContent =
+        "执行错误：\n\n" +
+        error.message +
+        "\n\n" +
+        error.stack;
+}
+
+
+/* =========================================================
+   配置
+   ========================================================= */
+
+const CONFIG_KEY =
+    "unicode_html_robustness_config_v2";
+
+
+function saveConfig(
+    showMessage = true
+) {
+
+    const config = {
+
+        enabledCodes:
+            Array.from(
+                enabledCodes
+            ),
+
+        noiseProbability:
+            document.getElementById(
+                "noiseProbability"
+            ).value,
+
+        maxRepeat:
+            document.getElementById(
+                "maxRepeat"
+            ).value,
+
+        maxWidth:
+            document.getElementById(
+                "maxWidth"
+            ).value,
+
+        randomSeed:
+            document.getElementById(
+                "randomSeed"
+            ).value,
+
+
+        enableNoise:
+            document.getElementById(
+                "enableNoise"
+            ).checked,
+
+        confusionProbability:
+            document.getElementById(
+                "confusionProbability"
+            ).value,
+
+        enableAsciiSmuggle:
+            document.getElementById(
+                "enableAsciiSmuggle"
+            ).checked,
+
+        enableZeroFont:
+            document.getElementById(
+                "enableZeroFont"
+            ).checked,
+
+        enableTableGrid:
+            document.getElementById(
+                "enableTableGrid"
+            ).checked,
+
+        enableHomoglyph:
+            document.getElementById(
+                "enableHomoglyph"
+            ).checked,
+
+        enableBayesian:
+            document.getElementById(
+                "enableBayesian"
+            ).checked,
+
+        enableBayesianHtmlNoise:
+            document.getElementById(
+                "enableBayesianHtmlNoise"
+            ).checked,
+
+        bayesianDensity:
+            document.getElementById(
+                "bayesianDensity"
+            ).value,
+
+        zeroFontProbability:
+            document.getElementById(
+                "zeroFontProbability"
+            ).value,
+
+        enableDomShuffle:
+            document.getElementById(
+                "enableDomShuffle"
+            ).checked,
+
+        enableLinkMutation:
+            document.getElementById(
+                "enableLinkMutation"
+            ).checked,
+
+        exportCount:
+            document.getElementById(
+                "exportCount"
+            ).value,
+
+        headMetaDensity:
+            document.getElementById(
+                "headMetaDensity"
+            ).value,
+
+        headCssMode:
+            document.getElementById(
+                "headCssMode"
+            ).value,
+
+        linkMutationMode:
+            document.getElementById(
+                "linkMutationMode"
+            ).value
+    };
+
+
+    try {
+        localStorage.setItem(
+            CONFIG_KEY,
+            JSON.stringify(config)
+        );
+    } catch (error) {
+        // file:// 或隐私模式下 localStorage 可能直接抛异常，
+        // 不能因为保存失败就让后续交互中断。
+        console.warn("配置保存失败：", error);
+
+        if (showMessage) {
+            writeSimpleLog("配置保存失败：浏览器禁止了本地存储。");
+        }
+
+        return;
+    }
+
+
+    if (showMessage) {
+
+        writeSimpleLog(
+            "配置已保存。\n" +
+            "启用字符：" +
+            enabledCodes.size
+        );
+    }
+}
+
+
+function loadConfig() {
+
+    try {
+
+        const raw =
+            localStorage.getItem(
+                CONFIG_KEY
+            );
+
+
+        if (!raw) {
+
+            return;
+        }
+
+
+        const config =
+            JSON.parse(raw);
+
+
+        if (
+            Array.isArray(
+                config.enabledCodes
+            )
+        ) {
+
+            enabledCodes =
+                new Set(
+                    config.enabledCodes.filter(
+                        code =>
+                            DEFAULT_CODES.includes(
+                                code
+                            )
+                    )
+                );
+        }
+
+
+        if (
+            config.noiseProbability !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "noiseProbability"
+            ).value =
+                config.noiseProbability;
+        }
+
+
+        if (
+            config.maxRepeat !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "maxRepeat"
+            ).value =
+                config.maxRepeat;
+        }
+
+
+        if (
+            config.maxWidth !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "maxWidth"
+            ).value =
+                config.maxWidth;
+        }
+
+
+        if (
+            config.randomSeed !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "randomSeed"
+            ).value =
+                config.randomSeed;
+        }
+
+
+
+
+        if (
+            config.enableNoise !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "enableNoise"
+            ).checked =
+                config.enableNoise;
+        }
+
+
+        if (
+            config.confusionProbability !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "confusionProbability"
+            ).value =
+                config.confusionProbability;
+        }
+
+
+        if (
+            config.bayesianDensity !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "bayesianDensity"
+            ).value =
+                config.bayesianDensity;
+        }
+
+
+        if (
+            config.zeroFontProbability !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "zeroFontProbability"
+            ).value =
+                config.zeroFontProbability;
+        }
+
+
+        [
+            ["enableAsciiSmuggle", "enableAsciiSmuggle"],
+            ["enableZeroFont", "enableZeroFont"],
+            ["enableTableGrid", "enableTableGrid"],
+            ["enableHomoglyph", "enableHomoglyph"],
+            ["enableBayesian", "enableBayesian"],
+            ["enableBayesianHtmlNoise", "enableBayesianHtmlNoise"],
+            ["enableDomShuffle", "enableDomShuffle"],
+            ["enableLinkMutation", "enableLinkMutation"]
+        ].forEach(([configKey, elementId]) => {
+
+            if (config[configKey] === undefined) {
+                return;
+            }
+
+            document.getElementById(
+                elementId
+            ).checked =
+                config[configKey];
+        });
+
+
+        updateConfusionProbabilityLabel();
+
+
+        if (
+            config.exportCount !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "exportCount"
+            ).value =
+                config.exportCount;
+        }
+
+
+        if (
+            config.headMetaDensity !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "headMetaDensity"
+            ).value =
+                config.headMetaDensity;
+        }
+
+
+        if (
+            config.headCssMode !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "headCssMode"
+            ).value =
+                config.headCssMode;
+        }
+
+
+        if (
+            config.linkMutationMode !==
+            undefined
+        ) {
+
+            document.getElementById(
+                "linkMutationMode"
+            ).value =
+                config.linkMutationMode;
+        }
+
+
+        renderCharList();
+
+
+    } catch (error) {
+
+        console.error(
+            "配置读取失败：",
+            error
+        );
+    }
+}
+
+
+function resetConfig() {
+
+    enabledCodes =
+        new Set(DEFAULT_CODES);
+
+
+    // 这里的默认值必须与 HTML 中 input 的初始值保持一致，
+    // 否则“恢复默认”会把界面改成一个用户从未见过的配置。
+    document.getElementById(
+        "noiseProbability"
+    ).value =
+        15;
+
+
+    document.getElementById(
+        "maxRepeat"
+    ).value =
+        2;
+
+
+    document.getElementById(
+        "maxWidth"
+    ).value =
+        "500-660";
+
+
+    document.getElementById(
+        "randomSeed"
+    ).value =
+        "";
+
+
+    document.getElementById(
+        "exportCount"
+    ).value =
+        10000;
+
+
+    document.getElementById(
+        "headMetaDensity"
+    ).value =
+        "normal";
+
+
+    document.getElementById(
+        "headCssMode"
+    ).value =
+        "random";
+
+
+    document.getElementById(
+        "linkMutationMode"
+    ).value =
+        "smart";
+
+
+    document.getElementById(
+        "enableNoise"
+    ).checked =
+        true;
+
+
+    document.getElementById(
+        "confusionProbability"
+    ).value =
+        20;
+
+
+    document.getElementById(
+        "enableAsciiSmuggle"
+    ).checked =
+        true;
+
+
+    document.getElementById(
+        "enableZeroFont"
+    ).checked =
+        true;
+
+
+    document.getElementById(
+        "enableTableGrid"
+    ).checked =
+        true;
+
+
+    document.getElementById(
+        "enableHomoglyph"
+    ).checked =
+        true;
+
+
+    document.getElementById(
+        "enableBayesian"
+    ).checked =
+        true;
+
+
+    document.getElementById(
+        "enableBayesianHtmlNoise"
+    ).checked =
+        true;
+
+
+    document.getElementById(
+        "bayesianDensity"
+    ).value =
+        5;
+
+
+    document.getElementById(
+        "zeroFontProbability"
+    ).value =
+        20;
+
+
+    document.getElementById(
+        "enableDomShuffle"
+    ).checked =
+        true;
+
+
+    document.getElementById(
+        "enableLinkMutation"
+    ).checked =
+        true;
+
+
+    updateConfusionProbabilityLabel();
+
+
+    renderCharList();
+
+    saveConfig(false);
+
+
+    writeSimpleLog(
+        "已恢复默认配置。"
+    );
+}
+
+
+function writeSimpleLog(text) {
+
+    document.getElementById(
+        "log"
+    ).textContent =
+        "[" +
+        new Date().toLocaleTimeString() +
+        "] " +
+        text;
+}
+
+
+/* =========================================================
+   初始化
+   ========================================================= */
+
+document.addEventListener(
+    "DOMContentLoaded",
+    () => {
+
+        renderCharList();
+
+        loadConfig();
+
+        updateConfusionProbabilityLabel();
+
+        const confusionSlider =
+            document.getElementById(
+                "confusionProbability"
+            );
+
+        if (confusionSlider) {
+
+            confusionSlider.addEventListener(
+                "input",
+                updateConfusionProbabilityLabel
+            );
+        }
+
+    }
+);
+
+
+
+</script>
+
+</body>
+</html>
